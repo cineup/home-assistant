@@ -1,0 +1,125 @@
+blueprint:
+  name: EMS-ESP – Remote Thermostat
+  description: Überträgt Temperatur und Feuchtigkeit an ein EMS-ESP Thermostat mit Bereichsprüfung und Fallback auf -1
+  domain: automation
+  input:
+    temperature_sensor:
+      name: Temperatur-Sensor
+      selector:
+        entity:
+          domain: sensor
+    humidity_sensor:
+      name: Feuchtigkeitssensor
+      selector:
+        entity:
+          domain: sensor
+    target_temperature_number:
+      name: Ziel-Temperatur (number entity)
+      selector:
+        entity:
+          domain: number
+    target_humidity_number:
+      name: Ziel-Feuchtigkeit (number entity)
+      selector:
+        entity:
+          domain: number
+    temperature_min:
+      name: Temperatur Minimum
+      default: 5.0
+      selector:
+        number:
+          min: -50
+          max: 50
+          step: 0.1
+          unit_of_measurement: "°C"
+          mode: box
+    temperature_max:
+      name: Temperatur Maximum
+      default: 30.0
+      selector:
+        number:
+          min: -50
+          max: 50
+          step: 0.1
+          unit_of_measurement: "°C"
+          mode: box
+    humidity_min:
+      name: Feuchtigkeit Minimum
+      default: 0.0
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+    humidity_max:
+      name: Feuchtigkeit Maximum
+      default: 100.0
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+
+variables:
+  temperature_min: !input temperature_min
+  temperature_max: !input temperature_max
+  humidity_min: !input humidity_min
+  humidity_max: !input humidity_max
+  temperature_sensor: !input temperature_sensor
+  humidity_sensor: !input humidity_sensor
+
+trigger:
+  - platform: state
+    entity_id: !input temperature_sensor
+  - platform: state
+    entity_id: !input humidity_sensor
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.entity_id == temperature_sensor }}"
+        sequence:
+          - variables:
+              val: "{{ states(temperature_sensor) | float }}"
+          - service: number.set_value
+            target:
+              entity_id: !input target_temperature_number
+            data:
+              value: "{{ val if temperature_min <= val <= temperature_max else -1 }}"
+          - if:
+              - condition: template
+                value_template: "{{ val < temperature_min or val > temperature_max }}"
+            then:
+              - service: persistent_notification.create
+                data:
+                  title: "Temperatur außerhalb Bereich"
+                  message: "{{ temperature_sensor }} meldete {{ val }} °C – -1 wurde gesetzt."
+
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.entity_id == humidity_sensor }}"
+        sequence:
+          - variables:
+              val: "{{ states(humidity_sensor) | float }}"
+          - service: number.set_value
+            target:
+              entity_id: !input target_humidity_number
+            data:
+              value: "{{ val if humidity_min <= val <= humidity_max else -1 }}"
+          - if:
+              - condition: template
+                value_template: "{{ val < humidity_min or val > humidity_max }}"
+            then:
+              - service: persistent_notification.create
+                data:
+                  title: "Luftfeuchtigkeit außerhalb Bereich"
+                  message: "{{ humidity_sensor }} meldete {{ val }} % – -1 wurde gesetzt."
+
+mode: single
