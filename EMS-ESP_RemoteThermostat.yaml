@@ -77,9 +77,13 @@ variables:
 trigger:
   - platform: state
     entity_id: !input temperature_sensor
-  - platform: state
-    entity_id: !input humidity_sensor
-    enabled: "{{ humidity_sensor != '' }}"
+  - platform: template
+    value_template: >
+      {% if humidity_sensor != '' %}
+        {{ states(humidity_sensor) != '' }}
+      {% else %}
+        false
+      {% endif %}
 
 condition: []
 
@@ -107,7 +111,8 @@ action:
 
       - conditions:
           - condition: template
-            value_template: "{{ humidity_sensor != '' and trigger.entity_id == humidity_sensor }}"
+            value_template: >
+              {{ humidity_sensor != '' and trigger.entity_id == humidity_sensor }}
         sequence:
           - variables:
               humidity_val: "{{ states(humidity_sensor) | float }}"
