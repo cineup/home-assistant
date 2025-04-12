@@ -1,6 +1,6 @@
 blueprint:
   name: EMS-ESP – Remote Thermostat
-  description: Überträgt Temperatur und Feuchtigkeit an ein EMS-ESP Thermostat mit Bereichsprüfung und Fallback auf -1
+  description: Überträgt Temperatur und optional Feuchtigkeit an ein EMS-ESP Thermostat mit Bereichsprüfung und Fallback auf -1
   domain: automation
   input:
     temperature_sensor:
@@ -9,10 +9,12 @@ blueprint:
         entity:
           domain: sensor
     humidity_sensor:
-      name: Feuchtigkeitssensor
+      name: Feuchtigkeitssensor (optional)
+      default: ''
       selector:
         entity:
           domain: sensor
+          multiple: false
     target_temperature_number:
       name: Ziel-Temperatur (number entity)
       selector:
@@ -20,9 +22,11 @@ blueprint:
           domain: number
     target_humidity_number:
       name: Ziel-Feuchtigkeit (number entity)
+      default: ''
       selector:
         entity:
           domain: number
+          multiple: false
     temperature_min:
       name: Temperatur Minimum
       default: 5.0
@@ -77,6 +81,7 @@ trigger:
     entity_id: !input temperature_sensor
   - platform: state
     entity_id: !input humidity_sensor
+    enabled: "{{ humidity_sensor != '' }}"
 
 condition: []
 
@@ -104,7 +109,7 @@ action:
 
       - conditions:
           - condition: template
-            value_template: "{{ trigger.entity_id == humidity_sensor }}"
+            value_template: "{{ humidity_sensor != '' and trigger.entity_id == humidity_sensor }}"
         sequence:
           - variables:
               val: "{{ states(humidity_sensor) | float }}"
