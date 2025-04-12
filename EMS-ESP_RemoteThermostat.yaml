@@ -73,6 +73,7 @@ variables:
   humidity_max: !input humidity_max
   temperature_sensor: !input temperature_sensor
   humidity_sensor: !input humidity_sensor
+  target_temperature_number: !input target_temperature_number
   target_humidity_number: !input target_humidity_number
 
 trigger:
@@ -97,9 +98,8 @@ action:
           - variables:
               val: "{{ states(temperature_sensor) | float }}"
           - service: number.set_value
-            target:
-              entity_id: !input target_temperature_number
             data:
+              entity_id: "{{ target_temperature_number }}"
               value: "{{ val if temperature_min <= val <= temperature_max else -1 }}"
           - if:
               - condition: template
@@ -113,27 +113,21 @@ action:
       - conditions:
           - condition: template
             value_template: >
-              {{ humidity_sensor != '' and trigger.entity_id == humidity_sensor }}
+              {{ humidity_sensor != '' and trigger.entity_id == humidity_sensor and target_humidity_number != '' }}
         sequence:
           - variables:
-              humidity_val: "{{ states(humidity_sensor) | float }}"
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ target_humidity_number != '' }}"
-                sequence:
-                  - service: number.set_value
-                    target:
-                      entity_id: !input target_humidity_number
-                    data:
-                      value: "{{ humidity_val if humidity_min <= humidity_val <= humidity_max else -1 }}"
-                  - if:
-                      - condition: template
-                        value_template: "{{ humidity_val < humidity_min or humidity_val > humidity_max }}"
-                    then:
-                      - service: persistent_notification.create
-                        data:
-                          title: "Luftfeuchtigkeit außerhalb Bereich"
-                          message: "{{ humidity_sensor }} meldete {{ humidity_val }} % – -1 wurde gesetzt."
+              val: "{{ states(humidity_sensor) | float }}"
+          - service: number.set_value
+            data:
+              entity_id: "{{ target_humidity_number }}"
+              value: "{{ val if humidity_min <= val <= humidity_max else -1 }}"
+          - if:
+              - condition: template
+                value_template: "{{ val < humidity_min or val > humidity_max }}"
+            then:
+              - service: persistent_notification.create
+                data:
+                  title: "Luftfeuchtigkeit außerhalb Bereich"
+                  message: "{{ humidity_sensor }} meldete {{ val }} % – -1 wurde gesetzt."
 
 mode: single
