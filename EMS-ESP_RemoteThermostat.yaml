@@ -21,7 +21,7 @@ blueprint:
         entity:
           domain: number
     target_humidity_number:
-      name: Ziel-Feuchtigkeit (number entity)
+      name: Ziel-Feuchtigkeit (number entity, optional)
       default: ''
       selector:
         entity:
@@ -112,19 +112,24 @@ action:
             value_template: "{{ humidity_sensor != '' and trigger.entity_id == humidity_sensor }}"
         sequence:
           - variables:
-              val: "{{ states(humidity_sensor) | float }}"
-          - service: number.set_value
-            target:
-              entity_id: !input target_humidity_number
-            data:
-              value: "{{ val if humidity_min <= val <= humidity_max else -1 }}"
+              humidity_val: "{{ states(humidity_sensor) | float }}"
+              target_humidity: !input target_humidity_number
           - if:
               - condition: template
-                value_template: "{{ val < humidity_min or val > humidity_max }}"
+                value_template: "{{ target_humidity != '' }}"
             then:
-              - service: persistent_notification.create
+              - service: number.set_value
+                target:
+                  entity_id: "{{ target_humidity }}"
                 data:
-                  title: "Luftfeuchtigkeit außerhalb Bereich"
-                  message: "{{ humidity_sensor }} meldete {{ val }} % – -1 wurde gesetzt."
+                  value: "{{ humidity_val if humidity_min <= humidity_val <= humidity_max else -1 }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ humidity_val < humidity_min or humidity_val > humidity_max }}"
+                then:
+                  - service: persistent_notification.create
+                    data:
+                      title: "Luftfeuchtigkeit außerhalb Bereich"
+                      message: "{{ humidity_sensor }} meldete {{ humidity_val }} % – -1 wurde gesetzt."
 
 mode: single
