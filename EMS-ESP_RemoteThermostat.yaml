@@ -14,7 +14,6 @@ blueprint:
       selector:
         entity:
           domain: sensor
-          multiple: false
     target_temperature_number:
       name: Ziel-Temperatur (number entity)
       selector:
@@ -26,7 +25,6 @@ blueprint:
       selector:
         entity:
           domain: number
-          multiple: false
     temperature_min:
       name: Temperatur Minimum
       default: 5.0
@@ -119,9 +117,8 @@ action:
                 value_template: "{{ target_humidity != '' }}"
             then:
               - service: number.set_value
-                target:
-                  entity_id: "{{ target_humidity }}"
                 data:
+                  entity_id: "{{ target_humidity }}"
                   value: "{{ humidity_val if humidity_min <= humidity_val <= humidity_max else -1 }}"
               - if:
                   - condition: template
