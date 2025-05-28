@@ -1,0 +1,43 @@
+blueprint:
+  name: Geräte Offline Benachrichtigung
+  description: Sendet eine Nachricht, wenn definierte Geräte offline sind (nach einstellbarer Zeit).
+  domain: automation
+  input:
+    targets:
+      name: Geräte
+      description: Liste der zu überwachenden Geräte (z. B. device_tracker oder binary_sensor)
+      selector:
+        entity:
+          multiple: true
+    offline_duration:
+      name: Zeit bis "offline"
+      description: Zeitspanne, nach der ein Gerät als offline gilt (Standard: 10 Minuten)
+      default: 00:10:00
+      selector:
+        duration: {}
+    notify_service:
+      name: Benachrichtigungsdienst
+      description: Der Dienst, der zur Benachrichtigung verwendet werden soll
+      default: persistent_notification.create
+      selector:
+        text:
+
+trigger:
+  - platform: state
+    entity_id: !input targets
+    to: 'not_home'
+    for: !input offline_duration
+
+action:
+  - variables:
+      device_name: "{{ trigger.to_state.name }}"
+      offline_time: "{{ now().strftime('%d.%m.%Y %H:%M:%S') }}"
+
+  - service: !input notify_service
+    data:
+      message: >
+        Gerät '{{ device_name }}' ist seit {{ offline_time }} offline.
+      title: "Gerät offline"
+
+mode: parallel
+max: 10
