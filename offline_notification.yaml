@@ -23,8 +23,8 @@ blueprint:
       name: Benachrichtigungsdienst
       description: Wähle einen verfügbaren notify-Dienst (z. B. für App oder Telegram)
       selector:
-        service:
-          domain: notify
+        text:
+          multiline: false
 
     repeat_reminder:
       name: Wiederholung der Meldung (optional)
