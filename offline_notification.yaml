@@ -1,43 +1,110 @@
 blueprint:
-  name: Geräte Offline Benachrichtigung
-  description: Sendet eine Nachricht, wenn definierte Geräte offline sind (nach einstellbarer Zeit).
+  name: Geräte Offline Benachrichtigung (vollständig)
+  description: >
+    Sendet gruppierte Meldungen, wenn definierte Geräte offline sind (z. B. 'unavailable', 'not_home', 'offline').
+    Unterstützt: Zeitfenster, Wiederholungen, Auswahl erkannter Benachrichtigungsdienste.
   domain: automation
   input:
     targets:
       name: Geräte
-      description: Liste der zu überwachenden Geräte (z. B. device_tracker oder binary_sensor)
+      description: Liste der zu überwachenden Geräte (z. B. device_tracker, binary_sensor)
       selector:
         entity:
           multiple: true
+
     offline_duration:
-      name: Zeit bis "offline"
-      description: "Zeitspanne, nach der ein Gerät als offline gilt (Standard 10 Minuten)"
+      name: Zeit bis als "offline" gilt
+      description: "Zeitspanne, nach der ein Gerät als offline gilt (Standard: 10 Minuten)"
       default: 00:10:00
       selector:
         duration: {}
+
     notify_service:
       name: Benachrichtigungsdienst
-      description: Der Dienst, der zur Benachrichtigung verwendet werden soll
-      default: persistent_notification.create
+      description: Wähle einen verfügbaren notify-Dienst (z. B. für App oder Telegram)
       selector:
-        text:
+        service:
+          domain: notify
+
+    repeat_reminder:
+      name: Wiederholung der Meldung (optional)
+      description: Alle X Minuten erneut benachrichtigen, solange Gerät(e) offline sind (0 = keine Wiederholung)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: min
+          mode: slider
+          step: 1
+
+    time_window_start:
+      name: Startzeit für Benachrichtigungen
+      description: Nur innerhalb dieses Zeitfensters wird benachrichtigt (optional)
+      default: "00:00:00"
+      selector:
+        time: {}
+
+    time_window_end:
+      name: Endzeit für Benachrichtigungen
+      description: Nur innerhalb dieses Zeitfensters wird benachrichtigt (optional)
+      default: "23:59:59"
+      selector:
+        time: {}
+
+mode: queued
+max: 10
 
 trigger:
   - platform: state
     entity_id: !input targets
-    to: 'not_home'
+    to:
+      - 'not_home'
+      - 'unavailable'
+      - 'offline'
     for: !input offline_duration
+
+variables:
+  reminder_interval: !input repeat_reminder
+  notify_service: !input notify_service
+  time_start: !input time_window_start
+  time_end: !input time_window_end
 
 action:
   - variables:
-      device_name: "{{ trigger.to_state.name }}"
+      device: "{{ trigger.to_state.name }}"
+      entity_id: "{{ trigger.entity_id }}"
+      state: "{{ trigger.to_state.state }}"
       offline_time: "{{ now().strftime('%d.%m.%Y %H:%M:%S') }}"
+      notify_text: "Gerät '{{ device }}' ({{ entity_id }}) ist seit {{ offline_time }} offline (Status: {{ state }})."
 
-  - service: !input notify_service
-    data:
-      message: >
-        Gerät '{{ device_name }}' ist seit {{ offline_time }} offline.
-      title: "Gerät offline"
-
-mode: parallel
-max: 10
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {% set now_time = now().strftime('%H:%M:%S') %}
+              {{ time_start <= now_time <= time_end }}
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: >
+                    {{ reminder_interval > 0 and states[entity_id].state in ['not_home', 'unavailable', 'offline'] }}
+              sequence:
+                - service: "{{ notify_service }}"
+                  data:
+                    message: "{{ notify_text }}"
+                    title: "Gerät offline"
+                - delay:
+                    minutes: "{{ reminder_interval }}"
+          - condition: template
+            value_template: "{{ reminder_interval == 0 }}"
+          - service: "{{ notify_service }}"
+            data:
+              message: "{{ notify_text }}"
+              title: "Gerät offline"
+    default:
+      - service: logbook.log
+        data:
+          name: "Geräte Offline Benachrichtigung"
+          message: "Zeitfenster nicht aktiv – keine Meldung gesendet für {{ device }}"
