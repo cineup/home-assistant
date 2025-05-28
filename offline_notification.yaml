@@ -1,9 +1,11 @@
 blueprint:
   name: Geräte Offline Benachrichtigung (vollständig)
   description: >
-    Sendet gruppierte Meldungen, wenn definierte Geräte offline sind (z. B. 'unavailable', 'not_home', 'offline').
-    Unterstützt: Zeitfenster, Wiederholungen, Auswahl erkannter Benachrichtigungsdienste.
+    Sendet gruppierte Meldungen, wenn definierte Geräte offline sind 
+    (z. B. 'unavailable', 'not_home', 'offline') – nach einstellbarer Zeit.
+    Unterstützt: Zeitfenster, Wiederholung, frei wählbarer Benachrichtigungsdienst.
   domain: automation
+
   input:
     targets:
       name: Geräte
@@ -21,7 +23,7 @@ blueprint:
 
     notify_service:
       name: Benachrichtigungsdienst
-      description: Wähle einen verfügbaren notify-Dienst (z. B. für App oder Telegram)
+      description: Trage hier z. B. `notify.mobile_app_dein_handy` oder `notify.telegram` ein
       selector:
         text:
           multiline: false
