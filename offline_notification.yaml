@@ -11,7 +11,7 @@ blueprint:
           multiple: true
     offline_duration:
       name: Zeit bis "offline"
-      description: Zeitspanne, nach der ein Gerät als offline gilt (Standard: 10 Minuten)
+      description: "Zeitspanne, nach der ein Gerät als offline gilt (Standard: 10 Minuten)"
       default: 00:10:00
       selector:
         duration: {}
