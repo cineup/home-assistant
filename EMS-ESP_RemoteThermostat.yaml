@@ -66,9 +66,13 @@ trigger:
     entity_id: !input temperature_sensor
 
   - platform: time_pattern
-    minutes: "/{{ heartbeat_interval }}"
+    minutes: "/1"
 
-condition: []
+condition:
+  - condition: template
+    value_template: >
+      {{ trigger.platform == 'state' or
+         (now().minute % heartbeat_interval | int) == 0 }}
 
 action:
   - variables:
