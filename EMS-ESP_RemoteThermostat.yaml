@@ -1,9 +1,13 @@
 blueprint:
   name: EMS-ESP – Remote Thermostat (nur Temperatur)
   description: >
-    Überträgt Temperatur an ein EMS-ESP Thermostat mit Bereichsprüfung und
-    Fallback auf -1. Sendet zusätzlich regelmäßig (Heartbeat), damit die Therme
-    keinen Sensor-Fehler meldet wenn der Wert stabil bleibt.
+    Überträgt die Raumtemperatur an ein EMS-ESP Thermostat mit Bereichsprüfung.
+    Ist der Wert ungültig (außerhalb Bereich oder Sensor nicht verfügbar), wird
+    KEIN -1 mehr gesendet – stattdessen wird der Regelmodus auf Wetterkompensation
+    umgeschaltet, damit die Therme nicht in den Not-/Fehlerbetrieb wechselt oder
+    unnötig heizt. Sobald der Wert wieder gültig ist, wird automatisch zurück auf
+    den raumgeführten Modus geschaltet. Sendet zusätzlich regelmäßig (Heartbeat),
+    damit die Therme keinen Sensor-Timeout meldet wenn der Wert stabil bleibt.
   domain: automation
   input:
     temperature_sensor:
@@ -17,6 +21,32 @@ blueprint:
       selector:
         entity:
           domain: number
+
+    control_mode_select:
+      name: Regelmodus (select entity)
+      description: >
+        Die select-Entity des Thermostats, z. B. select.thermostat_hc1_controlmode.
+      selector:
+        entity:
+          domain: select
+
+    control_mode_normal:
+      name: Regelmodus – Normalbetrieb
+      description: >
+        Option, auf die geschaltet wird wenn der Temperaturwert gültig ist
+        (raumgeführt). Muss exakt einer Option der Select-Entity entsprechen.
+      default: "room"
+      selector:
+        text:
+
+    control_mode_fallback:
+      name: Regelmodus – Fallback (ungültiger Wert)
+      description: >
+        Option, auf die bei ungültigem/fehlendem Wert geschaltet wird
+        (Wetterkompensation). Muss exakt einer Option der Select-Entity entsprechen.
+      default: "weather compensated"
+      selector:
+        text:
 
     temperature_min:
       name: Temperatur Minimum
@@ -57,6 +87,9 @@ blueprint:
 variables:
   temperature_sensor: !input temperature_sensor
   target_temperature_number: !input target_temperature_number
+  control_mode_select: !input control_mode_select
+  control_mode_normal: !input control_mode_normal
+  control_mode_fallback: !input control_mode_fallback
   temperature_min: !input temperature_min
   temperature_max: !input temperature_max
   heartbeat_interval: !input heartbeat_interval
@@ -77,19 +110,49 @@ condition:
 action:
   - variables:
       val: "{{ states(temperature_sensor) | float(-1) }}"
+      in_range: >
+        {{ states(temperature_sensor) not in ['unknown', 'unavailable', 'none']
+           and temperature_min <= val <= temperature_max }}
 
-  - service: number.set_value
-    data:
-      entity_id: "{{ target_temperature_number }}"
-      value: "{{ val if temperature_min <= val <= temperature_max else -1 }}"
+  - choose:
+      # Gültiger Wert: Temperatur senden und (zurück) auf raumgeführten Modus
+      - conditions:
+          - condition: template
+            value_template: "{{ in_range }}"
+        sequence:
+          - service: number.set_value
+            data:
+              entity_id: "{{ target_temperature_number }}"
+              value: "{{ val }}"
 
-  - if:
-      - condition: template
-        value_template: "{{ val < temperature_min or val > temperature_max }}"
-    then:
+          - if:
+              - condition: template
+                value_template: "{{ states(control_mode_select) != control_mode_normal }}"
+            then:
+              - service: select.select_option
+                target:
+                  entity_id: "{{ control_mode_select }}"
+                data:
+                  option: "{{ control_mode_normal }}"
+
+    # Ungültiger Wert: KEIN -1 senden, sondern auf Wetterkompensation umschalten
+    default:
+      - if:
+          - condition: template
+            value_template: "{{ states(control_mode_select) != control_mode_fallback }}"
+        then:
+          - service: select.select_option
+            target:
+              entity_id: "{{ control_mode_select }}"
+            data:
+              option: "{{ control_mode_fallback }}"
+
       - service: persistent_notification.create
         data:
           title: "Temperatur außerhalb Bereich"
-          message: "{{ temperature_sensor }} meldete {{ val }} °C – -1 wurde gesetzt."
+          message: >
+            {{ temperature_sensor }} meldete '{{ states(temperature_sensor) }}' –
+            Regelung auf '{{ control_mode_fallback }}' umgeschaltet
+            (statt -1 zu senden).
 
 mode: single
