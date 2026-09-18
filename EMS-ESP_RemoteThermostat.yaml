@@ -8,6 +8,8 @@ blueprint:
     unnötig heizt. Sobald der Wert wieder gültig ist, wird automatisch zurück auf
     den raumgeführten Modus geschaltet. Sendet zusätzlich regelmäßig (Heartbeat),
     damit die Therme keinen Sensor-Timeout meldet wenn der Wert stabil bleibt.
+    Im Fehlerfall entsteht genau EINE Meldung, die beim Heartbeat aktualisiert und
+    bei Entwarnung automatisch wieder entfernt wird – optional zusätzlich als Push.
   domain: automation
   input:
     temperature_sensor:
@@ -84,6 +86,16 @@ blueprint:
           unit_of_measurement: "min"
           mode: slider
 
+    notify_service:
+      name: Push-Benachrichtigungsdienst (optional)
+      description: >
+        z. B. notify.mobile_app_dein_handy. Leer lassen = kein Push, es wird nur
+        die Meldung in Home Assistant angezeigt. Ein Push kommt ausschließlich beim
+        Wechsel in den Fehlerzustand und bei der Entwarnung – nicht beim Heartbeat.
+      default: ""
+      selector:
+        text:
+
 variables:
   temperature_sensor: !input temperature_sensor
   target_temperature_number: !input target_temperature_number
@@ -93,6 +105,7 @@ variables:
   temperature_min: !input temperature_min
   temperature_max: !input temperature_max
   heartbeat_interval: !input heartbeat_interval
+  notify_service: !input notify_service
 
 trigger:
   - platform: state
@@ -109,10 +122,22 @@ condition:
 
 action:
   - variables:
-      val: "{{ states(temperature_sensor) | float(-1) }}"
+      raw: "{{ states(temperature_sensor) }}"
+      sensor_name: "{{ state_attr(temperature_sensor, 'friendly_name') or temperature_sensor }}"
+      is_num: "{{ states(temperature_sensor) | is_number }}"
+      val: "{{ states(temperature_sensor) | float(0) }}"
       in_range: >
-        {{ states(temperature_sensor) not in ['unknown', 'unavailable', 'none']
-           and temperature_min <= val <= temperature_max }}
+        {{ states(temperature_sensor) | is_number
+           and temperature_min <= states(temperature_sensor) | float(0) <= temperature_max }}
+      # Feste ID: die Meldung wird bei jedem Lauf überschrieben statt neu angelegt.
+      # Aus der Ziel-Entity abgeleitet, damit mehrere Heizkreise sich nicht überschreiben.
+      notify_id: "ems_esp_remote_thermostat_{{ target_temperature_number | replace('.', '_') }}"
+      # Fehlerbeginn = Zeitpunkt, an dem auf Fallback umgeschaltet wurde
+      fault_since: >
+        {{ as_local(states[control_mode_select].last_changed).strftime('%d.%m.%Y %H:%M')
+           if states(control_mode_select) == control_mode_fallback
+           else now().strftime('%d.%m.%Y %H:%M') }}
+      push_enabled: "{{ notify_service | default('', true) | trim | length > 0 }}"
 
   - choose:
       # Gültiger Wert: Temperatur senden und (zurück) auf raumgeführten Modus
@@ -125,6 +150,11 @@ action:
               entity_id: "{{ target_temperature_number }}"
               value: "{{ val }}"
 
+          # Eventuell offene Störungsmeldung entfernen (No-op wenn keine existiert)
+          - service: persistent_notification.dismiss
+            data:
+              notification_id: "{{ notify_id }}"
+
           - if:
               - condition: template
                 value_template: "{{ states(control_mode_select) != control_mode_normal }}"
@@ -135,8 +165,32 @@ action:
                 data:
                   option: "{{ control_mode_normal }}"
 
+              # Entwarnung nur beim Wechsel zurück, nicht bei jedem Heartbeat
+              - if:
+                  - condition: template
+                    value_template: "{{ push_enabled }}"
+                then:
+                  - service: "{{ notify_service }}"
+                    data:
+                      title: "Raumtemperatur wieder gültig"
+                      message: >-
+                        Sensor „{{ sensor_name }}“ meldet wieder {{ val }} °C.
+                        Regelung zurück auf „{{ control_mode_normal }}“.
+
     # Ungültiger Wert: KEIN -1 senden, sondern auf Wetterkompensation umschalten
     default:
+      - variables:
+          # Vor dem Umschalten auswerten: war der Fehler vorher noch nicht aktiv?
+          was_ok: "{{ states(control_mode_select) != control_mode_fallback }}"
+          fault_title: >-
+            {{ 'Raumtemperatur-Sensor nicht verfügbar' if not is_num
+               else 'Raumtemperatur außerhalb des gültigen Bereichs' }}
+          fault_reason: >-
+            {% if not is_num %}Sensor „{{ sensor_name }}“ meldet „{{ raw }}“ –
+            kein gültiger Messwert.{% else %}Sensor „{{ sensor_name }}“ meldet
+            {{ val }} °C – zulässig sind {{ temperature_min }} bis
+            {{ temperature_max }} °C.{% endif %}
+
       - if:
           - condition: template
             value_template: "{{ states(control_mode_select) != control_mode_fallback }}"
@@ -147,12 +201,29 @@ action:
             data:
               option: "{{ control_mode_fallback }}"
 
+      # Gleiche notification_id => genau ein Eintrag, der aktualisiert wird
       - service: persistent_notification.create
         data:
-          title: "Temperatur außerhalb Bereich"
-          message: >
-            {{ temperature_sensor }} meldete '{{ states(temperature_sensor) }}' –
-            Regelung auf '{{ control_mode_fallback }}' umgeschaltet
-            (statt -1 zu senden).
+          notification_id: "{{ notify_id }}"
+          title: "{{ fault_title }}"
+          message: |-
+            {{ fault_reason }}
+
+            Die Therme regelt seit {{ fault_since }} über „{{ control_mode_fallback }}“; es wird kein Raumtemperaturwert gesendet.
+
+            Letzte Prüfung: {{ now().strftime('%H:%M') }} Uhr.
+
+      # Push nur beim Wechsel in den Fehlerzustand
+      - if:
+          - condition: template
+            value_template: "{{ was_ok and push_enabled }}"
+        then:
+          - service: "{{ notify_service }}"
+            data:
+              title: "{{ fault_title }}"
+              message: >-
+                {{ fault_reason }}
+                Regelung läuft über „{{ control_mode_fallback }}“.
 
 mode: single
+max_exceeded: silent
