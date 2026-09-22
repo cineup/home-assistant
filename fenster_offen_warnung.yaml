@@ -1,41 +1,46 @@
 blueprint:
-  name: Fenster-offen-Warnung – smart (Schimmel- & Auskühlschutz)
+  name: Fenster smart – Offen-Warnung & Kondensat-Frühwarnung
   description: >
-    Dauerhafte iPhone-Meldung, wenn ein Fenster zu lange offen oder gekippt ist –
-    aber erst dann, wenn es auch sinnvoll ist.
+    Zwei Wächter für ein Fenster in einer Automatisierung:
 
 
-    Die Blueprint prüft vor der Meldung ab:
-
-    * **Lüftungsbedarf (Schimmel):** Ist die Raumfeuchte über dem Grenzwert,
-      wird die Wartezeit verlängert – es darf weiter gelüftet werden.
-
-    * **Lüften sinnvoll?** Optional wird die *absolute* Luftfeuchte innen/aussen
-      verglichen (Magnus-Formel). Ist es draussen feuchter als drinnen, bringt
-      Lüften nichts → keine Verlängerung.
-
-    * **Lüftungsziel erreicht:** Fällt die Feuchte unter den Zielwert, kommt die
-      Meldung sofort nach der Grundzeit („du kannst zumachen").
-
-    * **Auskühlschutz:** Unterschreitet die Raumtemperatur ein Minimum, fällt sie
-      um X Kelvin ab, oder herrscht draussen Frost → sofortige Meldung.
-
-    * **Abwesenheit / Regen:** Optional sofortige Meldung, wenn alle ausser Haus
-      sind oder es regnet/schneit.
+    **A · Fenster offen** – dauerhafte iPhone-Meldung, wenn zu lange offen oder
+    gekippt. Die Wartezeit wird verlängert, solange wirklich gelüftet werden muss,
+    und verkürzt, sobald der Raum auskühlt.
 
 
-    Die Meldung wird danach **bis zum Schliessen des Fensters oder bis zur
-    Bestätigung** in einstellbarem Takt wiederholt (gleicher `tag` → sie ersetzt
-    sich selbst, es entsteht keine Flut). Optional eskaliert sie nach X
-    Wiederholungen auf iOS **critical** (durchbricht Fokus/Lautlos).
-    Beim Schliessen wird die Meldung automatisch vom Sperrbildschirm entfernt.
+    **B · Kondensat-Frühwarnung** – meldet bei *geschlossenem* Fenster, dass jetzt
+    gelüftet werden sollte: entweder weil die Wandoberfläche rechnerisch in den
+    Schimmelbereich läuft, oder weil die Feuchte schnell ansteigt (Duschen, Kochen).
 
 
-    **Eine Automatisierung pro Fenster anlegen.**
+    Schimmelkriterium wahlweise über den **Taupunkt an der Wandoberfläche**
+    (empfohlen) oder über die relative Raumluftfeuchte:
+
+    * Taupunkt innen nach Magnus-Formel.
+
+    * Wandtemperatur entweder gemessen oder geschätzt über den Temperaturfaktor
+      fRsi: `T_Wand = T_aussen + fRsi * (T_innen - T_aussen)`.
+
+    * Schimmelgefahr, sobald die Oberfläche den Taupunkt für 80 % Oberflächen-
+      feuchte unterschreitet – also lange bevor sichtbares Tauwasser entsteht.
 
 
-    Hinweis: Die Benachrichtigungsaktionen („Erledigt" / „Später") funktionieren
-    nur mit `notify.mobile_app_*`-Diensten der Companion-App.
+    Zusätzlich wird die *absolute* Feuchte innen/aussen verglichen: ist es draussen
+    feuchter, bringt Lüften nichts – dann gibt es keine Verlängerung und keine
+    Lüftungsaufforderung.
+
+
+    Meldungen wiederholen sich in einstellbarem Takt bis das Fenster zu ist oder
+    jemand bestätigt hat. Durch den gleichen `tag` ersetzt sich die Meldung selbst,
+    es entsteht keine Flut. Beim Schliessen wird sie automatisch entfernt.
+
+
+    **Eine Automatisierung pro Fenster/Raum.**
+
+
+    Hinweis: Die Tasten in der Meldung brauchen `notify.mobile_app_*` der
+    Companion-App.
   domain: automation
   source_url: https://github.com/cineup/home-assistant/blob/main/fenster_offen_warnung.yaml
   homeassistant:
@@ -95,8 +100,11 @@ blueprint:
                 device_class: humidity
 
         outdoor_temperature_sensor:
-          name: Temperatur aussen (optional)
-          description: Für Frostwarnung und den Vergleich der absoluten Feuchte.
+          name: Temperatur aussen
+          description: >
+            Für Frostwarnung, den Vergleich der absoluten Feuchte und die
+            Schätzung der Wandtemperatur. Ohne diesen Sensor arbeitet das
+            Taupunkt-Kriterium nicht – dann „Relative Raumluftfeuchte" wählen.
           default: []
           selector:
             entity:
@@ -116,6 +124,19 @@ blueprint:
                 device_class: humidity
               multiple: true
 
+        wall_temperature_sensor:
+          name: Wandoberflächen-Temperatur (optional)
+          description: >
+            Falls vorhanden (z. B. DS18B20 an der kältesten Aussenwandecke).
+            Ersetzt die Schätzung über den Temperaturfaktor.
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                device_class: temperature
+              multiple: true
+
         weather_entity:
           name: Wetter-Entität (optional)
           description: Für „sofort melden bei Regen/Schnee".
@@ -127,7 +148,7 @@ blueprint:
               multiple: true
 
     sec_melden:
-      name: 3 · Benachrichtigung
+      name: 3 · Meldung „Fenster offen"
       icon: mdi:cellphone-message
       input:
         notify_targets:
@@ -227,12 +248,67 @@ blueprint:
             boolean:
 
     sec_schimmel:
-      name: 4 · Schimmelschutz / Lüften
+      name: 4 · Schimmel-Kriterium
       icon: mdi:water-percent-alert
       input:
+        mold_mode:
+          name: Kriterium für „Lüften nötig"
+          description: >
+            **Taupunkt:** rechnet die Feuchte auf die kalte Wandoberfläche um –
+            physikalisch korrekt und deutlich früher dran.
+            **Relative Feuchte:** einfacher Schwellwert, falls kein Aussensensor
+            vorhanden ist.
+          default: taupunkt
+          selector:
+            select:
+              mode: list
+              options:
+                - label: Taupunkt an der Wandoberfläche (empfohlen)
+                  value: taupunkt
+                - label: Relative Raumluftfeuchte
+                  value: relativ
+
+        wall_factor:
+          name: Temperaturfaktor fRsi der Aussenwand
+          description: >
+            Nur wenn kein Wandsensor vorhanden. Wie warm bleibt die Wandinnenseite?
+            Altbau ungedämmt ≈ 0.5–0.6 · saniert ≈ 0.7 · Neubau/KfW ≈ 0.85.
+            Wärmebrücken (Raumecke, Fensterlaibung) liegen tiefer – im Zweifel
+            0.05–0.1 niedriger ansetzen.
+          default: 0.7
+          selector:
+            number:
+              min: 0.4
+              max: 0.95
+              step: 0.01
+              mode: slider
+
+        mold_surface_rh:
+          name: Kritische Oberflächenfeuchte
+          description: Ab dieser Feuchte an der Wand kann Schimmel wachsen (Normwert 80 %).
+          default: 80
+          selector:
+            number:
+              min: 65
+              max: 95
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+
+        mold_margin:
+          name: Sicherheitsabstand „ausgelüftet"
+          description: Um so viel muss die Wand wieder über dem kritischen Taupunkt liegen.
+          default: 1.0
+          selector:
+            number:
+              min: 0
+              max: 5
+              step: 0.1
+              unit_of_measurement: "K"
+              mode: box
+
         humidity_limit:
-          name: Feuchte-Grenzwert „Lüften nötig"
-          description: Ab diesem Wert gilt Lüften als nötig → Wartezeit wird verlängert.
+          name: Feuchte-Grenzwert (Modus „Relative Raumluftfeuchte")
           default: 60
           selector:
             number:
@@ -243,8 +319,7 @@ blueprint:
               mode: slider
 
         humidity_target:
-          name: Ziel-Feuchte „ausgelüftet"
-          description: Wird dieser Wert erreicht, kommt die Meldung ohne Verlängerung.
+          name: Ziel-Feuchte (Modus „Relative Raumluftfeuchte")
           default: 50
           selector:
             number:
@@ -270,8 +345,7 @@ blueprint:
           name: Absolute Feuchte innen/aussen vergleichen
           description: >
             Benötigt Aussen-Temperatur und Aussen-Feuchte. Ist die absolute Feuchte
-            draussen nicht niedriger als drinnen, bringt Lüften nichts – es gibt
-            dann keine Verlängerung.
+            draussen nicht niedriger als drinnen, bringt Lüften nichts.
           default: true
           selector:
             boolean:
@@ -328,8 +402,88 @@ blueprint:
               unit_of_measurement: "°C"
               mode: box
 
+    sec_kondensat:
+      name: 6 · Kondensat-Frühwarnung (Fenster zu)
+      icon: mdi:water-alert
+      input:
+        condensation_enable:
+          name: Frühwarnung aktiv
+          default: true
+          selector:
+            boolean:
+
+        condensation_delay:
+          name: Verzögerung
+          description: So lange muss der kritische Zustand anhalten, bevor gemeldet wird.
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 180
+              step: 1
+              unit_of_measurement: min
+              mode: box
+
+        humidity_rate_sensor:
+          name: Feuchte-Anstiegssensor (optional)
+          description: >
+            Derivative-Helfer auf den Feuchtesensor, Einheit %/h
+            (Einstellungen → Geräte & Dienste → Helfer → Ableitung).
+            Erkennt Duschen/Kochen, bevor der Grenzwert überhaupt erreicht ist.
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: sensor
+              multiple: true
+
+        humidity_rate_limit:
+          name: Grenzwert Feuchte-Anstieg
+          default: 8
+          selector:
+            number:
+              min: 1
+              max: 60
+              step: 1
+              unit_of_measurement: "%/h"
+              mode: box
+
+        vent_repeat:
+          name: Wiederholung der Lüftungs-Erinnerung
+          description: 0 = nur einmal melden.
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 240
+              step: 5
+              unit_of_measurement: min
+              mode: box
+
+        vent_time_start:
+          name: Frühestens ab
+          description: Ausserhalb dieses Fensters wird nicht zum Lüften aufgefordert.
+          default: "07:00:00"
+          selector:
+            time:
+
+        vent_time_end:
+          name: Spätestens bis
+          default: "22:00:00"
+          selector:
+            time:
+
+        vent_only_if_useful:
+          name: Nur erinnern, wenn Lüften auch etwas bringt
+          description: >
+            EIN = bei feuchter Aussenluft schweigen. AUS = stattdessen den Hinweis
+            senden, dass geheizt statt gelüftet werden sollte.
+          default: true
+          selector:
+            boolean:
+
     sec_extra:
-      name: 6 · Zusätzliche Auslöser & Pause
+      name: 7 · Zusätzliche Auslöser & Pause
       icon: mdi:tune
       input:
         presence_entities:
@@ -357,7 +511,7 @@ blueprint:
 
         pause_entity:
           name: Pausen-Schalter (optional)
-          description: Ist dieser Helfer EIN, wird nicht gewarnt (z. B. „Putztag", „Sommerlüftung").
+          description: Ist dieser Helfer EIN, wird gar nicht gewarnt (z. B. „Putztag", „Sommerlüftung").
           default: []
           selector:
             entity:
@@ -380,7 +534,22 @@ blueprint:
 mode: restart
 max_exceeded: silent
 
+# Nur diese Variablen sind in Triggern verfuegbar (eingeschraenkte Templates).
+trigger_variables:
+  tv_enable: !input condensation_enable
+  tv_mode: !input mold_mode
+  tv_win_open: !input window_open
+  tv_win_tilt: !input window_tilt
+  tv_temp: !input temperature_sensor
+  tv_hum: !input humidity_sensor
+  tv_out_temp: !input outdoor_temperature_sensor
+  tv_wall: !input wall_temperature_sensor
+  tv_factor: !input wall_factor
+  tv_surface_rh: !input mold_surface_rh
+  tv_hum_limit: !input humidity_limit
+
 triggers:
+  # --- Zweig A: Fenster geht auf ---------------------------------------------
   - trigger: state
     entity_id: !input window_open
     to: "on"
@@ -393,6 +562,41 @@ triggers:
     event: start
     id: neustart
 
+  # --- Zweig B: Kondensat-Frueh
+  #     Schimmelgefahr bei geschlossenem Fenster
+  - trigger: template
+    id: kondensat
+    value_template: >
+      {% if not tv_enable %}
+        false
+      {% else %}
+        {% set tilt_on = tv_win_tilt | count > 0
+             and expand(tv_win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+        {% set zu = not (is_state(tv_win_open, 'on') or tilt_on) %}
+        {% set ti = states(tv_temp) | float(-999) %}
+        {% set hi = states(tv_hum) | float(-1) %}
+        {% set ot = states(tv_out_temp[0]) | float(-999) if tv_out_temp | count > 0 else -999 %}
+        {% if tv_mode == 'taupunkt' %}
+          {% set h80 = [hi / (tv_surface_rh / 100), 100] | min if hi > 0 else -1 %}
+          {% set a80 = (log(h80 / 100) + 17.62 * ti / (243.12 + ti))
+               if (ti > -900 and h80 > 0) else none %}
+          {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
+          {% set tw = states(tv_wall[0]) | float(-999) if tv_wall | count > 0
+               else ((ot + tv_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+          {{ zu and tw > -900 and td80 > -900 and tw <= td80 }}
+        {% else %}
+          {{ zu and hi >= tv_hum_limit }}
+        {% endif %}
+      {% endif %}
+    for:
+      minutes: !input condensation_delay
+
+  #     Schneller Feuchteanstieg (Duschen, Kochen, Waesche)
+  - trigger: numeric_state
+    id: anstieg
+    entity_id: !input humidity_rate_sensor
+    above: !input humidity_rate_limit
+
 variables:
   win_open: !input window_open
   win_tilt: !input window_tilt
@@ -400,9 +604,11 @@ variables:
   hum_ent: !input humidity_sensor
   out_temp_l: !input outdoor_temperature_sensor
   out_hum_l: !input outdoor_humidity_sensor
+  wall_l: !input wall_temperature_sensor
   weather_l: !input weather_entity
   presence_l: !input presence_entities
   pause_l: !input pause_entity
+  rate_l: !input humidity_rate_sensor
   room: !input room_name
 
   targets_raw: !input notify_targets
@@ -423,6 +629,10 @@ variables:
   notify_url: !input notify_url
   close_confirm: !input close_confirmation
 
+  mold_mode: !input mold_mode
+  wall_factor: !input wall_factor
+  mold_rh: !input mold_surface_rh
+  mold_margin: !input mold_margin
   hum_limit: !input humidity_limit
   hum_target: !input humidity_target
   vent_bonus: !input ventilation_bonus
@@ -433,245 +643,462 @@ variables:
   drop_max: !input max_temp_drop
   frost_limit: !input frost_limit
 
+  vent_repeat: !input vent_repeat
+  vent_start: !input vent_time_start
+  vent_end: !input vent_time_end
+  vent_useful_only: !input vent_only_if_useful
+  rate_limit: !input humidity_rate_limit
+
   absence_immediate: !input absence_immediate
   rain_immediate: !input rain_immediate
   check_sec: !input check_interval
 
   slug: "{{ this.entity_id | replace('automation.', '') }}"
   alert_tag: "fenster_{{ slug }}"
+  vent_tag: "lueften_{{ slug }}"
   ack_action: "FENSTER_OK_{{ slug | upper }}"
   snooze_action: "FENSTER_SNOOZE_{{ slug | upper }}"
+  vent_ack_action: "LUEFTEN_OK_{{ slug | upper }}"
 
 conditions:
-  # Fenster muss (noch) offen oder gekippt sein – fängt auch den HA-Neustart ab.
   - condition: template
-    value_template: >
-      {{ is_state(win_open, 'on')
-         or (win_tilt | count > 0
-             and expand(win_tilt) | selectattr('state', 'eq', 'on') | list | count > 0) }}
-  # Pausen-Schalter
+    value_template: "{{ targets | count > 0 }}"
+  # Pausen-Schalter legt beide Zweige still
   - condition: template
     value_template: >
       {{ pause_l | count == 0
-         or expand(pause_l) | selectattr('state', 'eq', 'on') | list | count == 0 }}
-  - condition: template
-    value_template: "{{ targets | count > 0 }}"
-
-actions:
-  # ---------------------------------------------------------------- Startwerte
-  - variables:
-      opened_at: "{{ now().timestamp() | int }}"
-      temp_start: "{{ states(temp_ent) | float(-999) }}"
-      lueftung_start: >
-        {% set hi = states(hum_ent) | float(-1) %}
-        {{ hi >= 0 and hi >= hum_limit }}
-
-  # ------------------------------------------- Phase 1: Warte-/Lüftungsfenster
-  - repeat:
-      sequence:
-        - delay:
-            seconds: "{{ check_sec }}"
-      until:
-        - condition: template
-          value_template: >
-            {% set tilt_on = win_tilt | count > 0
-                 and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
-            {% set offen = is_state(win_open, 'on') or tilt_on %}
-            {% set gekippt = tilt_on and not is_state(win_open, 'on') %}
-
-            {% set ti = states(temp_ent) | float(-999) %}
-            {% set hi = states(hum_ent) | float(-1) %}
-            {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
-            {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
-
-            {% set ahi = (216.7 * (hi / 100 * 6.112
-                 * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
-                 if (ti > -900 and hi >= 0) else -1 %}
-            {% set aho = (216.7 * (oh / 100 * 6.112
-                 * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
-                 if (ot > -900 and oh >= 0) else -1 %}
-
-            {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
-            {% set lueften = hi >= 0 and hi >= hum_limit and sinnvoll %}
-            {% set ziel = lueftung_start and hi >= 0 and hi <= hum_target %}
-
-            {% set basis = (delay_tilt if gekippt else delay_open) * 60 %}
-            {% set wartezeit = basis + (vent_bonus * 60 if lueften else 0) %}
-
-            {% set kalt = ti > -900 and ti <= temp_min %}
-            {% set abfall = temp_start > -900 and ti > -900 and (temp_start - ti) >= drop_max %}
-            {% set frost = frost_limit > -50 and ot > -900 and ot <= frost_limit %}
-            {% set weg = absence_immediate and presence_l | count > 0
-                 and expand(presence_l) | selectattr('state','eq','home') | list | count == 0 %}
-            {% set regen = rain_immediate and weather_l | count > 0
-                 and states(weather_l[0]) in
-                 ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
-
-            {% set elapsed = now().timestamp() - opened_at %}
-
-            {{ not offen or kalt or abfall or frost or weg or regen
-               or elapsed >= (basis if ziel else wartezeit) }}
-
-  # Fenster ist inzwischen zu -> fertig, keine Meldung
+         or expand(pause_l) | selectattr('state','eq','on') | list | count == 0 }}
+  # Zweig A nur bei offenem, Zweig B nur bei geschlossenem Fenster.
+  # Dadurch koennen sich die beiden Zweige trotz mode:restart nie gegenseitig
+  # abwuergen - die Bedingung wird geprueft, BEVOR ein laufender Durchlauf
+  # neu gestartet wird.
   - condition: template
     value_template: >
-      {{ is_state(win_open, 'on')
-         or (win_tilt | count > 0
-             and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0) }}
+      {% set tilt_on = win_tilt | count > 0
+           and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+      {% set offen = is_state(win_open, 'on') or tilt_on %}
+      {% set tid = (trigger.id | default('')) if trigger is defined else '' %}
+      {{ offen if tid in ['auf', 'gekippt', 'neustart'] else not offen }}
 
-  # ----------------------------------------------------------- Grund ermitteln
-  - variables:
-      grund: >
-        {% set ti = states(temp_ent) | float(-999) %}
-        {% set hi = states(hum_ent) | float(-1) %}
-        {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
-        {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
-        {% set ahi = (216.7 * (hi / 100 * 6.112
-             * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
-             if (ti > -900 and hi >= 0) else -1 %}
-        {% set aho = (216.7 * (oh / 100 * 6.112
-             * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
-             if (ot > -900 and oh >= 0) else -1 %}
-        {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
-        {% set kalt = ti > -900 and ti <= temp_min %}
-        {% set abfall = temp_start > -900 and ti > -900 and (temp_start - ti) >= drop_max %}
-        {% set frost = frost_limit > -50 and ot > -900 and ot <= frost_limit %}
-        {% set weg = absence_immediate and presence_l | count > 0
-             and expand(presence_l) | selectattr('state','eq','home') | list | count == 0 %}
-        {% set regen = rain_immediate and weather_l | count > 0
-             and states(weather_l[0]) in
-             ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
-        {% if weg %}Niemand mehr zu Hause – bitte schliessen!
-        {% elif kalt %}Raum kühlt aus ({{ ti | round(1) }} °C) – bitte schliessen!
-        {% elif abfall %}Temperatur um {{ (temp_start - ti) | round(1) }} K gefallen – bitte schliessen!
-        {% elif frost %}Frost draussen ({{ ot | round(1) }} °C) – bitte schliessen!
-        {% elif regen %}Es regnet/schneit – bitte schliessen!
-        {% elif lueftung_start and hi >= 0 and hi <= hum_target %}Ausgelüftet ({{ hi | round(0) | int }} %) – Fenster kann zu.
-        {% elif hi >= hum_limit and not sinnvoll %}Draussen feuchter als drinnen – Lüften bringt nichts.
-        {% elif hi >= hum_limit %}Noch feucht ({{ hi | round(0) | int }} %), aber lange offen.
-        {% else %}Fenster steht schon lange offen.
-        {% endif %}
-
-  # -------------------------------------------------- Phase 2: Dauer-Erinnerung
-  - repeat:
-      sequence:
-        - variables:
-            runde: "{{ repeat.index }}"
-            kritisch: "{{ critical_after > 0 and repeat.index >= critical_after }}"
-            push_data: >
-              {% set acts = [ {'action': ack_action, 'title': 'Erledigt / ignorieren'} ] %}
-              {% if snooze_min > 0 %}
-                {% set acts = acts + [ {'action': snooze_action,
-                     'title': 'Später (' ~ snooze_min ~ ' min)'} ] %}
-              {% endif %}
-              {% set d = {
-                   'tag': alert_tag,
-                   'group': 'fenster',
-                   'apns_headers': {'apns-collapse-id': alert_tag},
-                   'actions': acts,
-                   'push': {
-                     'interruption-level': ('critical' if kritisch else 'time-sensitive'),
-                     'sound': ({'name': 'default', 'critical': 1, 'volume': 1.0}
-                               if kritisch else 'default'),
-                     'thread-id': alert_tag,
-                     'badge': 1
-                   }
-                 } %}
-              {% if notify_url %}{% set d = dict(d, url=notify_url) %}{% endif %}
-              {{ d }}
-
-        - repeat:
-            for_each: "{{ targets }}"
-            sequence:
-              - action: "{{ repeat.item }}"
-                data:
-                  title: >
-                    {% set tilt_on = win_tilt | count > 0
-                         and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
-                    {{ '🪟 ' ~ room ~ ': Fenster ' ~ ('gekippt' if tilt_on and not is_state(win_open,'on') else 'offen') }}
-                  message: >
-                    {% set ti = states(temp_ent) | float(-999) %}
-                    {% set hi = states(hum_ent) | float(-1) %}
-                    {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
-                    {% set mins = ((now().timestamp() - opened_at) / 60) | round(0) | int %}
-                    {{ grund | trim }}
-                    Seit {{ mins }} min · 🌡 {{ ti | round(1) }} °C · 💧 {{ hi | round(0) | int }} %
-                    {%- if ot > -900 %} · aussen {{ ot | round(1) }} °C{% endif %}
-                    {%- if runde > 1 %} · ({{ runde }}. Erinnerung){% endif %}
-                  data: "{{ push_data }}"
-
-        - wait_for_trigger:
-            - trigger: state
-              entity_id: !input window_open
-              to: "off"
-            - trigger: state
-              entity_id: !input window_tilt
-              to: "off"
-            - trigger: event
-              event_type: mobile_app_notification_action
-          timeout: "{{ (repeat_min * 60) | int }}"
-          continue_on_timeout: true
-
-        # „Später erinnern" gedrückt -> schlummern und danach erneut melden
-        - if:
-            - condition: template
-              value_template: >
-                {{ snooze_min > 0
-                   and wait.trigger is defined and wait.trigger is not none
-                   and wait.trigger.event is defined
-                   and (wait.trigger.event.data.action | default('')) == snooze_action }}
-          then:
-            - repeat:
-                for_each: "{{ targets }}"
-                sequence:
-                  - action: "{{ repeat.item }}"
-                    data:
-                      message: clear_notification
-                      data:
-                        tag: "{{ alert_tag }}"
-            - delay:
-                minutes: "{{ snooze_min }}"
-      until:
-        - condition: template
-          value_template: >
-            {% set tilt_on = win_tilt | count > 0
-                 and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
-            {% set offen = is_state(win_open, 'on') or tilt_on %}
-            {% set act = (wait.trigger.event.data.action | default(''))
-                 if (wait.trigger is defined and wait.trigger is not none
-                     and wait.trigger.event is defined) else '' %}
-            {{ not offen or act == ack_action
-               or (max_rounds > 0 and repeat.index >= max_rounds) }}
-
-  # ------------------------------------------------------------------ Aufräumen
-  - repeat:
-      for_each: "{{ targets }}"
-      sequence:
-        - action: "{{ repeat.item }}"
-          data:
-            message: clear_notification
-            data:
-              tag: "{{ alert_tag }}"
-
+actions:
   - choose:
-      - conditions:
+
+      # ====================================================================
+      # ZWEIG A - Fenster steht offen
+      # ====================================================================
+      - alias: Fenster offen
+        conditions:
           - condition: template
             value_template: >
-              {% set tilt_on = win_tilt | count > 0
-                   and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
-              {{ close_confirm and not (is_state(win_open, 'on') or tilt_on) }}
+              {{ ((trigger.id | default('')) if trigger is defined else '')
+                 in ['auf', 'gekippt', 'neustart'] }}
         sequence:
+          # Eine evtl. offene Luefungsaufforderung ist jetzt erledigt
           - repeat:
               for_each: "{{ targets }}"
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: "✅ {{ room }}"
-                    message: >
-                      Fenster geschlossen · 🌡 {{ states(temp_ent) | float(0) | round(1) }} °C
-                      · 💧 {{ states(hum_ent) | float(0) | round(0) | int }} %
+                    message: clear_notification
                     data:
-                      tag: "{{ alert_tag }}_ok"
-                      group: fenster
-                      push:
-                        interruption-level: passive
+                      tag: "{{ vent_tag }}"
+
+          - variables:
+              opened_at: "{{ now().timestamp() | int }}"
+              temp_start: "{{ states(temp_ent) | float(-999) }}"
+              lueftung_start: >
+                {% set ti = states(temp_ent) | float(-999) %}
+                {% set hi = states(hum_ent) | float(-1) %}
+                {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                {% if mold_mode == 'taupunkt' %}
+                  {% set h80 = [hi / (mold_rh / 100), 100] | min if hi > 0 else -1 %}
+                  {% set a80 = (log(h80 / 100) + 17.62 * ti / (243.12 + ti))
+                       if (ti > -900 and h80 > 0) else none %}
+                  {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
+                  {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
+                       else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+                  {{ tw > -900 and td80 > -900 and tw <= td80 }}
+                {% else %}
+                  {{ hi >= 0 and hi >= hum_limit }}
+                {% endif %}
+
+          # ---------------------------------------- Phase 1: Warte-/Lueftungsfenster
+          - repeat:
+              sequence:
+                - delay:
+                    seconds: "{{ check_sec }}"
+              until:
+                - condition: template
+                  value_template: >
+                    {% set tilt_on = win_tilt | count > 0
+                         and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+                    {% set offen = is_state(win_open, 'on') or tilt_on %}
+                    {% set gekippt = tilt_on and not is_state(win_open, 'on') %}
+
+                    {% set ti = states(temp_ent) | float(-999) %}
+                    {% set hi = states(hum_ent) | float(-1) %}
+                    {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                    {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
+
+                    {# absolute Feuchte innen/aussen (Magnus) #}
+                    {% set ahi = (216.7 * (hi / 100 * 6.112
+                         * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
+                         if (ti > -900 and hi >= 0) else -1 %}
+                    {% set aho = (216.7 * (oh / 100 * 6.112
+                         * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
+                         if (ot > -900 and oh >= 0) else -1 %}
+                    {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
+
+                    {# Taupunkt fuer kritische Oberflaechenfeuchte + Wandtemperatur #}
+                    {% set h80 = [hi / (mold_rh / 100), 100] | min if hi > 0 else -1 %}
+                    {% set a80 = (log(h80 / 100) + 17.62 * ti / (243.12 + ti))
+                         if (ti > -900 and h80 > 0) else none %}
+                    {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
+                    {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
+                         else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+
+                    {% if mold_mode == 'taupunkt' %}
+                      {% set gefahr = tw > -900 and td80 > -900 and tw <= td80 %}
+                      {% set ziel = lueftung_start and tw > -900 and td80 > -900
+                           and tw >= td80 + mold_margin %}
+                    {% else %}
+                      {% set gefahr = hi >= 0 and hi >= hum_limit %}
+                      {% set ziel = lueftung_start and hi >= 0 and hi <= hum_target %}
+                    {% endif %}
+                    {% set lueften = gefahr and sinnvoll %}
+
+                    {% set basis = (delay_tilt if gekippt else delay_open) * 60 %}
+                    {% set wartezeit = basis + (vent_bonus * 60 if lueften else 0) %}
+
+                    {% set kalt = ti > -900 and ti <= temp_min %}
+                    {% set abfall = temp_start > -900 and ti > -900 and (temp_start - ti) >= drop_max %}
+                    {% set frost = frost_limit > -50 and ot > -900 and ot <= frost_limit %}
+                    {% set weg = absence_immediate and presence_l | count > 0
+                         and expand(presence_l) | selectattr('state','eq','home') | list | count == 0 %}
+                    {% set regen = rain_immediate and weather_l | count > 0
+                         and states(weather_l[0]) in
+                         ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
+
+                    {% set elapsed = now().timestamp() - opened_at %}
+
+                    {{ not offen or kalt or abfall or frost or weg or regen
+                       or elapsed >= (basis if ziel else wartezeit) }}
+
+          # Fenster ist inzwischen zu -> fertig, keine Meldung
+          - condition: template
+            value_template: >
+              {{ is_state(win_open, 'on')
+                 or (win_tilt | count > 0
+                     and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0) }}
+
+          # ------------------------------------------------------- Grund ermitteln
+          - variables:
+              grund: >
+                {% set ti = states(temp_ent) | float(-999) %}
+                {% set hi = states(hum_ent) | float(-1) %}
+                {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
+                {% set ahi = (216.7 * (hi / 100 * 6.112
+                     * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
+                     if (ti > -900 and hi >= 0) else -1 %}
+                {% set aho = (216.7 * (oh / 100 * 6.112
+                     * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
+                     if (ot > -900 and oh >= 0) else -1 %}
+                {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
+                {% set h80 = [hi / (mold_rh / 100), 100] | min if hi > 0 else -1 %}
+                {% set a80 = (log(h80 / 100) + 17.62 * ti / (243.12 + ti))
+                     if (ti > -900 and h80 > 0) else none %}
+                {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
+                {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
+                     else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+                {% if mold_mode == 'taupunkt' %}
+                  {% set gefahr = tw > -900 and td80 > -900 and tw <= td80 %}
+                  {% set ziel = lueftung_start and tw > -900 and td80 > -900
+                       and tw >= td80 + mold_margin %}
+                {% else %}
+                  {% set gefahr = hi >= 0 and hi >= hum_limit %}
+                  {% set ziel = lueftung_start and hi >= 0 and hi <= hum_target %}
+                {% endif %}
+                {% set kalt = ti > -900 and ti <= temp_min %}
+                {% set abfall = temp_start > -900 and ti > -900 and (temp_start - ti) >= drop_max %}
+                {% set frost = frost_limit > -50 and ot > -900 and ot <= frost_limit %}
+                {% set weg = absence_immediate and presence_l | count > 0
+                     and expand(presence_l) | selectattr('state','eq','home') | list | count == 0 %}
+                {% set regen = rain_immediate and weather_l | count > 0
+                     and states(weather_l[0]) in
+                     ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
+                {% if weg %}Niemand mehr zu Hause – bitte schliessen!
+                {% elif kalt %}Raum kühlt aus ({{ ti | round(1) }} °C) – bitte schliessen!
+                {% elif abfall %}Temperatur um {{ (temp_start - ti) | round(1) }} K gefallen – bitte schliessen!
+                {% elif frost %}Frost draussen ({{ ot | round(1) }} °C) – bitte schliessen!
+                {% elif regen %}Es regnet/schneit – bitte schliessen!
+                {% elif ziel %}Ausgelüftet – Wand {{ tw | round(1) }} °C liegt wieder über dem
+                  kritischen Taupunkt {{ td80 | round(1) }} °C. Fenster kann zu.
+                {% elif gefahr and not sinnvoll %}Draussen feuchter als drinnen – Lüften bringt nichts.
+                {% elif gefahr and mold_mode == 'taupunkt' %}Wand {{ tw | round(1) }} °C, kritischer
+                  Taupunkt {{ td80 | round(1) }} °C – noch nicht ausgelüftet, aber lange offen.
+                {% elif gefahr %}Noch feucht ({{ hi | round(0) | int }} %), aber lange offen.
+                {% else %}Fenster steht schon lange offen.
+                {% endif %}
+
+          # ------------------------------------------ Phase 2: Dauer-Erinnerung
+          - repeat:
+              sequence:
+                - variables:
+                    runde: "{{ repeat.index }}"
+                    kritisch: "{{ critical_after > 0 and repeat.index >= critical_after }}"
+                    push_data: >
+                      {% set acts = [ {'action': ack_action, 'title': 'Erledigt / ignorieren'} ] %}
+                      {% if snooze_min > 0 %}
+                        {% set acts = acts + [ {'action': snooze_action,
+                             'title': 'Später (' ~ snooze_min ~ ' min)'} ] %}
+                      {% endif %}
+                      {% set d = {
+                           'tag': alert_tag,
+                           'group': 'fenster',
+                           'apns_headers': {'apns-collapse-id': alert_tag},
+                           'actions': acts,
+                           'push': {
+                             'interruption-level': ('critical' if kritisch else 'time-sensitive'),
+                             'sound': ({'name': 'default', 'critical': 1, 'volume': 1.0}
+                                       if kritisch else 'default'),
+                             'thread-id': alert_tag,
+                             'badge': 1
+                           }
+                         } %}
+                      {% if notify_url %}{% set d = dict(d, url=notify_url) %}{% endif %}
+                      {{ d }}
+
+                - repeat:
+                    for_each: "{{ targets }}"
+                    sequence:
+                      - action: "{{ repeat.item }}"
+                        data:
+                          title: >
+                            {% set tilt_on = win_tilt | count > 0
+                                 and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+                            {{ '🪟 ' ~ room ~ ': Fenster '
+                               ~ ('gekippt' if tilt_on and not is_state(win_open,'on') else 'offen') }}
+                          message: >
+                            {% set ti = states(temp_ent) | float(-999) %}
+                            {% set hi = states(hum_ent) | float(-1) %}
+                            {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                            {% set mins = ((now().timestamp() - opened_at) / 60) | round(0) | int %}
+                            {{ grund | trim }}
+                            Seit {{ mins }} min · 🌡 {{ ti | round(1) }} °C · 💧 {{ hi | round(0) | int }} %
+                            {%- if ot > -900 %} · aussen {{ ot | round(1) }} °C{% endif %}
+                            {%- if runde > 1 %} · ({{ runde }}. Erinnerung){% endif %}
+                          data: "{{ push_data }}"
+
+                - wait_for_trigger:
+                    - trigger: state
+                      entity_id: !input window_open
+                      to: "off"
+                    - trigger: state
+                      entity_id: !input window_tilt
+                      to: "off"
+                    - trigger: event
+                      event_type: mobile_app_notification_action
+                  timeout: "{{ (repeat_min * 60) | int }}"
+                  continue_on_timeout: true
+
+                # „Später erinnern" gedrueckt -> schlummern und danach erneut melden
+                - if:
+                    - condition: template
+                      value_template: >
+                        {{ snooze_min > 0
+                           and wait.trigger is defined and wait.trigger is not none
+                           and wait.trigger.event is defined
+                           and (wait.trigger.event.data.action | default('')) == snooze_action }}
+                  then:
+                    - repeat:
+                        for_each: "{{ targets }}"
+                        sequence:
+                          - action: "{{ repeat.item }}"
+                            data:
+                              message: clear_notification
+                              data:
+                                tag: "{{ alert_tag }}"
+                    - delay:
+                        minutes: "{{ snooze_min }}"
+              until:
+                - condition: template
+                  value_template: >
+                    {% set tilt_on = win_tilt | count > 0
+                         and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+                    {% set offen = is_state(win_open, 'on') or tilt_on %}
+                    {% set act = (wait.trigger.event.data.action | default(''))
+                         if (wait.trigger is defined and wait.trigger is not none
+                             and wait.trigger.event is defined) else '' %}
+                    {{ not offen or act == ack_action
+                       or (max_rounds > 0 and repeat.index >= max_rounds) }}
+
+          # ---------------------------------------------------------- Aufraeumen
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ alert_tag }}"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% set tilt_on = win_tilt | count > 0
+                           and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+                      {{ close_confirm and not (is_state(win_open, 'on') or tilt_on) }}
+                sequence:
+                  - repeat:
+                      for_each: "{{ targets }}"
+                      sequence:
+                        - action: "{{ repeat.item }}"
+                          data:
+                            title: "✅ {{ room }}"
+                            message: >
+                              Fenster geschlossen · 🌡 {{ states(temp_ent) | float(0) | round(1) }} °C
+                              · 💧 {{ states(hum_ent) | float(0) | round(0) | int }} %
+                            data:
+                              tag: "{{ alert_tag }}_ok"
+                              group: fenster
+                              push:
+                                interruption-level: passive
+
+      # ====================================================================
+      # ZWEIG B - Fenster zu, aber es sollte gelueftet werden
+      # ====================================================================
+      - alias: Kondensat-Fruehwarnung
+        conditions:
+          - condition: template
+            value_template: >
+              {{ ((trigger.id | default('')) if trigger is defined else '')
+                 in ['kondensat', 'anstieg'] }}
+        sequence:
+          - repeat:
+              sequence:
+                - variables:
+                    vrunde: "{{ repeat.index }}"
+                    lage: >
+                      {% set ti = states(temp_ent) | float(-999) %}
+                      {% set hi = states(hum_ent) | float(-1) %}
+                      {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                      {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
+                      {% set ahi = (216.7 * (hi / 100 * 6.112
+                           * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
+                           if (ti > -900 and hi >= 0) else -1 %}
+                      {% set aho = (216.7 * (oh / 100 * 6.112
+                           * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
+                           if (ot > -900 and oh >= 0) else -1 %}
+                      {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
+                      {% set h80 = [hi / (mold_rh / 100), 100] | min if hi > 0 else -1 %}
+                      {% set a80 = (log(h80 / 100) + 17.62 * ti / (243.12 + ti))
+                           if (ti > -900 and h80 > 0) else none %}
+                      {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
+                      {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
+                           else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+                      {% set gefahr = (tw > -900 and td80 > -900 and tw <= td80)
+                           if mold_mode == 'taupunkt' else (hi >= 0 and hi >= hum_limit) %}
+                      {% set rate = states(rate_l[0]) | float(0) if rate_l | count > 0 else 0 %}
+                      {% set anstieg = rate_l | count > 0 and rate >= rate_limit %}
+                      {{ {'ti': ti, 'hi': hi, 'ot': ot, 'tw': tw, 'td80': td80, 'ahi': ahi,
+                          'aho': aho, 'rate': rate, 'gefahr': gefahr, 'anstieg': anstieg,
+                          'sinnvoll': sinnvoll} }}
+
+                # Nur innerhalb des Zeitfensters und nur wenn die Lage noch besteht
+                - if:
+                    - condition: template
+                      value_template: >
+                        {% set jetzt = now().strftime('%H:%M:%S') %}
+                        {% set imfenster = (vent_start <= jetzt <= vent_end)
+                             if vent_start <= vent_end
+                             else (jetzt >= vent_start or jetzt <= vent_end) %}
+                        {{ imfenster and (lage.gefahr or lage.anstieg)
+                           and (lage.sinnvoll or not vent_useful_only)
+                           and (vent_repeat > 0 or vrunde == 1) }}
+                  then:
+                    - repeat:
+                        for_each: "{{ targets }}"
+                        sequence:
+                          - action: "{{ repeat.item }}"
+                            data:
+                              title: >
+                                {{ ('💧 ' ~ room ~ ': bitte lüften')
+                                   if lage.sinnvoll
+                                   else ('🔥 ' ~ room ~ ': heizen statt lüften') }}
+                              message: >
+                                {% if not lage.sinnvoll %}
+                                  Schimmelgefahr, aber draussen ist es feuchter
+                                  ({{ lage.aho | round(1) }} statt {{ lage.ahi | round(1) }} g/m³) –
+                                  Lüften bringt jetzt nichts, Raum lieber wärmer halten.
+                                {% elif lage.anstieg and not lage.gefahr %}
+                                  Feuchte steigt schnell ({{ lage.rate | round(1) }} %/h) –
+                                  jetzt kurz stosslüften, bevor es kritisch wird.
+                                {% elif mold_mode == 'taupunkt' %}
+                                  Wandoberfläche {{ lage.tw | round(1) }} °C liegt unter dem
+                                  kritischen Taupunkt {{ lage.td80 | round(1) }} °C – Schimmelgefahr.
+                                {% else %}
+                                  Raumfeuchte {{ lage.hi | round(0) | int }} % über dem Grenzwert.
+                                {% endif %}
+                                🌡 {{ lage.ti | round(1) }} °C · 💧 {{ lage.hi | round(0) | int }} %
+                                {%- if lage.ot > -900 %} · aussen {{ lage.ot | round(1) }} °C{% endif %}
+                                {%- if vrunde > 1 %} · ({{ vrunde }}. Erinnerung){% endif %}
+                              data: >
+                                {% set d = {
+                                     'tag': vent_tag,
+                                     'group': 'fenster',
+                                     'apns_headers': {'apns-collapse-id': vent_tag},
+                                     'actions': [ {'action': vent_ack_action, 'title': 'Erledigt'} ],
+                                     'push': {
+                                       'interruption-level': 'time-sensitive',
+                                       'sound': 'default',
+                                       'thread-id': vent_tag
+                                     }
+                                   } %}
+                                {% if notify_url %}{% set d = dict(d, url=notify_url) %}{% endif %}
+                                {{ d }}
+
+                - wait_for_trigger:
+                    - trigger: state
+                      entity_id: !input window_open
+                      to: "on"
+                    - trigger: state
+                      entity_id: !input window_tilt
+                      to: "on"
+                    - trigger: event
+                      event_type: mobile_app_notification_action
+                  timeout: "{{ ((vent_repeat if vent_repeat > 0 else 15) * 60) | int }}"
+                  continue_on_timeout: true
+              until:
+                - condition: template
+                  value_template: >
+                    {% set tilt_on = win_tilt | count > 0
+                         and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+                    {% set offen = is_state(win_open, 'on') or tilt_on %}
+                    {% set act = (wait.trigger.event.data.action | default(''))
+                         if (wait.trigger is defined and wait.trigger is not none
+                             and wait.trigger.event is defined) else '' %}
+                    {% set ti = states(temp_ent) | float(-999) %}
+                    {% set hi = states(hum_ent) | float(-1) %}
+                    {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                    {% set h80 = [hi / (mold_rh / 100), 100] | min if hi > 0 else -1 %}
+                    {% set a80 = (log(h80 / 100) + 17.62 * ti / (243.12 + ti))
+                         if (ti > -900 and h80 > 0) else none %}
+                    {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
+                    {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
+                         else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+                    {% set gefahr = (tw > -900 and td80 > -900 and tw <= td80 + mold_margin)
+                         if mold_mode == 'taupunkt' else (hi >= 0 and hi > hum_target) %}
+                    {% set rate = states(rate_l[0]) | float(0) if rate_l | count > 0 else 0 %}
+                    {% set anstieg = rate_l | count > 0 and rate >= rate_limit %}
+                    {{ offen or act == vent_ack_action or not (gefahr or anstieg) }}
+
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ vent_tag }}"
