@@ -132,11 +132,14 @@ action:
       # Feste ID: die Meldung wird bei jedem Lauf überschrieben statt neu angelegt.
       # Aus der Ziel-Entity abgeleitet, damit mehrere Heizkreise sich nicht überschreiben.
       notify_id: "ems_esp_remote_thermostat_{{ target_temperature_number | replace('.', '_') }}"
-      # Fehlerbeginn = Zeitpunkt, an dem auf Fallback umgeschaltet wurde
+      # Fehlerbeginn = seit wann der Sensor diesen Zustand meldet.
+      # Bewusst am Sensor festgemacht und nicht am Regelmodus: dessen Zustand wird
+      # von dieser Automation selbst geschrieben und kann vom Thermostat wieder
+      # zurueckgesetzt werden - last_changed waere dort kein verlaesslicher Marker.
       fault_since: >
-        {{ as_local(states[control_mode_select].last_changed).strftime('%d.%m.%Y %H:%M')
-           if states(control_mode_select) == control_mode_fallback
-           else now().strftime('%d.%m.%Y %H:%M') }}
+        {{ as_local(states[temperature_sensor].last_changed).strftime('%d.%m. %H:%M')
+           if states[temperature_sensor] is not none
+           else now().strftime('%d.%m. %H:%M') }}
       push_enabled: "{{ notify_service | default('', true) | trim | length > 0 }}"
 
   - choose:
@@ -172,30 +175,33 @@ action:
                 then:
                   - service: "{{ notify_service }}"
                     data:
-                      title: "Raumtemperatur wieder gültig"
+                      title: "{{ sensor_name }} wieder gültig"
                       message: >-
-                        Sensor „{{ sensor_name }}“ meldet wieder {{ val }} °C.
-                        Regelung zurück auf „{{ control_mode_normal }}“.
+                        {{ val }} °C – Regelmodus zurück auf
+                        „{{ control_mode_normal }}“.
 
     # Ungültiger Wert: KEIN -1 senden, sondern auf Wetterkompensation umschalten
     default:
       - variables:
           # Vor dem Umschalten auswerten: war der Fehler vorher noch nicht aktiv?
           was_ok: "{{ states(control_mode_select) != control_mode_fallback }}"
+          # Sensorname steht im Titel, der Text nennt ihn deshalb nicht noch einmal
           fault_title: >-
-            {{ 'Raumtemperatur-Sensor nicht verfügbar' if not is_num
-               else 'Raumtemperatur außerhalb des gültigen Bereichs' }}
-          fault_reason: >-
-            {% if not is_num %}Sensor „{{ sensor_name }}“ meldet „{{ raw }}“ –
-            kein gültiger Messwert.{% else %}Sensor „{{ sensor_name }}“ meldet
-            {{ val }} °C – zulässig sind {{ temperature_min }} bis
-            {{ temperature_max }} °C.{% endif %}
+            {{ sensor_name }}{{ ' nicht verfügbar' if not is_num
+               else ' außerhalb Bereich' }}
+          fault_value: >-
+            {% if not is_num %}„{{ raw }}“{% else %}{{ val }} °C (zulässig
+            {{ temperature_min }}–{{ temperature_max }} °C){% endif %}
 
       - if:
           - condition: template
             value_template: "{{ states(control_mode_select) != control_mode_fallback }}"
         then:
+          # continue_on_error: ist das Thermostat selbst offline, schlaegt das
+          # Umschalten fehl - die Meldung unten soll dann trotzdem geschrieben
+          # werden, denn genau dann ist sie am wichtigsten.
           - service: select.select_option
+            continue_on_error: true
             target:
               entity_id: "{{ control_mode_select }}"
             data:
@@ -206,12 +212,12 @@ action:
         data:
           notification_id: "{{ notify_id }}"
           title: "{{ fault_title }}"
+          # Regelmodus bewusst als Ist-Zustand: steht hier „unavailable“, ist auch
+          # das Thermostat weg und die Umschaltung oben ist ins Leere gelaufen.
           message: |-
-            {{ fault_reason }}
-
-            Die Therme regelt seit {{ fault_since }} über „{{ control_mode_fallback }}“; es wird kein Raumtemperaturwert gesendet.
-
-            Letzte Prüfung: {{ now().strftime('%H:%M') }} Uhr.
+            - **Wert:** {{ fault_value }} seit {{ fault_since }}
+            - **Regelmodus:** {{ states(control_mode_select) }}
+            - **Geprüft:** {{ now().strftime('%H:%M') }} Uhr
 
       # Push nur beim Wechsel in den Fehlerzustand
       - if:
@@ -222,8 +228,8 @@ action:
             data:
               title: "{{ fault_title }}"
               message: >-
-                {{ fault_reason }}
-                Regelung läuft über „{{ control_mode_fallback }}“.
+                {{ fault_value }} seit {{ fault_since }} –
+                Regelmodus: {{ states(control_mode_select) }}.
 
 mode: single
 max_exceeded: silent
