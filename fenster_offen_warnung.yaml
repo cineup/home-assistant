@@ -1,0 +1,677 @@
+blueprint:
+  name: Fenster-offen-Warnung – smart (Schimmel- & Auskühlschutz)
+  description: >
+    Dauerhafte iPhone-Meldung, wenn ein Fenster zu lange offen oder gekippt ist –
+    aber erst dann, wenn es auch sinnvoll ist.
+
+
+    Die Blueprint prüft vor der Meldung ab:
+
+    * **Lüftungsbedarf (Schimmel):** Ist die Raumfeuchte über dem Grenzwert,
+      wird die Wartezeit verlängert – es darf weiter gelüftet werden.
+
+    * **Lüften sinnvoll?** Optional wird die *absolute* Luftfeuchte innen/aussen
+      verglichen (Magnus-Formel). Ist es draussen feuchter als drinnen, bringt
+      Lüften nichts → keine Verlängerung.
+
+    * **Lüftungsziel erreicht:** Fällt die Feuchte unter den Zielwert, kommt die
+      Meldung sofort nach der Grundzeit („du kannst zumachen").
+
+    * **Auskühlschutz:** Unterschreitet die Raumtemperatur ein Minimum, fällt sie
+      um X Kelvin ab, oder herrscht draussen Frost → sofortige Meldung.
+
+    * **Abwesenheit / Regen:** Optional sofortige Meldung, wenn alle ausser Haus
+      sind oder es regnet/schneit.
+
+
+    Die Meldung wird danach **bis zum Schliessen des Fensters oder bis zur
+    Bestätigung** in einstellbarem Takt wiederholt (gleicher `tag` → sie ersetzt
+    sich selbst, es entsteht keine Flut). Optional eskaliert sie nach X
+    Wiederholungen auf iOS **critical** (durchbricht Fokus/Lautlos).
+    Beim Schliessen wird die Meldung automatisch vom Sperrbildschirm entfernt.
+
+
+    **Eine Automatisierung pro Fenster anlegen.**
+
+
+    Hinweis: Die Benachrichtigungsaktionen („Erledigt" / „Später") funktionieren
+    nur mit `notify.mobile_app_*`-Diensten der Companion-App.
+  domain: automation
+  source_url: https://github.com/cineup/home-assistant/blob/main/fenster_offen_warnung.yaml
+  homeassistant:
+    min_version: "2024.10.0"
+
+  input:
+    sec_fenster:
+      name: 1 · Fenster & Raum
+      icon: mdi:window-open-variant
+      input:
+        window_open:
+          name: Sensor „Fenster auf"
+          description: Binärsensor, der EIN ist, wenn das Fenster (ganz) geöffnet ist.
+          selector:
+            entity:
+              filter:
+                domain: binary_sensor
+
+        window_tilt:
+          name: Sensor „Fenster gekippt" (optional)
+          description: >
+            Separater Kipp-Kontakt. Leer lassen, wenn es keinen gibt.
+            Für „gekippt" gilt eine eigene (meist längere) Grundzeit.
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: binary_sensor
+              multiple: true
+
+        room_name:
+          name: Raumname
+          description: Erscheint im Titel der Meldung.
+          default: Raum
+          selector:
+            text:
+              multiline: false
+
+    sec_klima:
+      name: 2 · Klima-Sensoren
+      icon: mdi:thermometer-water
+      input:
+        temperature_sensor:
+          name: Temperatur innen
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                device_class: temperature
+
+        humidity_sensor:
+          name: Luftfeuchte innen
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                device_class: humidity
+
+        outdoor_temperature_sensor:
+          name: Temperatur aussen (optional)
+          description: Für Frostwarnung und den Vergleich der absoluten Feuchte.
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                device_class: temperature
+              multiple: true
+
+        outdoor_humidity_sensor:
+          name: Luftfeuchte aussen (optional)
+          description: Nur zusammen mit „Temperatur aussen" sinnvoll.
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                device_class: humidity
+              multiple: true
+
+        weather_entity:
+          name: Wetter-Entität (optional)
+          description: Für „sofort melden bei Regen/Schnee".
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: weather
+              multiple: true
+
+    sec_melden:
+      name: 3 · Benachrichtigung
+      icon: mdi:cellphone-message
+      input:
+        notify_targets:
+          name: Benachrichtigungsdienste
+          description: >
+            Ein Eintrag pro iPhone, z. B. `notify.mobile_app_iphone_anna`.
+            Das Präfix `notify.` darf weggelassen werden.
+          default: []
+          selector:
+            text:
+              multiline: false
+              multiple: true
+
+        delay_open:
+          name: Grundzeit „Fenster auf"
+          description: Nach dieser Zeit wird gemeldet (sofern nicht verlängert).
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 240
+              step: 1
+              unit_of_measurement: min
+              mode: box
+
+        delay_tilt:
+          name: Grundzeit „Fenster gekippt"
+          default: 45
+          selector:
+            number:
+              min: 1
+              max: 480
+              step: 1
+              unit_of_measurement: min
+              mode: box
+
+        repeat_interval:
+          name: Wiederholung der Meldung
+          description: Takt, in dem die Meldung erneut gesendet wird, bis Fenster zu oder bestätigt.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 120
+              step: 1
+              unit_of_measurement: min
+              mode: box
+
+        snooze_minutes:
+          name: „Später erinnern"-Dauer
+          description: Dauer der Schlummer-Taste in der Meldung. 0 = Taste ausblenden.
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 120
+              step: 5
+              unit_of_measurement: min
+              mode: slider
+
+        critical_after:
+          name: Eskalation auf „critical" nach X Wiederholungen
+          description: >
+            Ab dieser Wiederholung wird die iOS-Meldung als *critical* gesendet und
+            durchbricht Lautlos/Fokus. 0 = nie eskalieren.
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 20
+              step: 1
+              mode: box
+
+        max_rounds:
+          name: Maximale Anzahl Meldungen
+          description: 0 = unbegrenzt (bis Fenster zu oder bestätigt).
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 1
+              mode: box
+
+        notify_url:
+          name: Ziel beim Antippen (optional)
+          description: "z. B. /lovelace/klima oder eine App-URL."
+          default: ""
+          selector:
+            text:
+              multiline: false
+
+        close_confirmation:
+          name: Bestätigung senden, wenn Fenster geschlossen wurde
+          default: false
+          selector:
+            boolean:
+
+    sec_schimmel:
+      name: 4 · Schimmelschutz / Lüften
+      icon: mdi:water-percent-alert
+      input:
+        humidity_limit:
+          name: Feuchte-Grenzwert „Lüften nötig"
+          description: Ab diesem Wert gilt Lüften als nötig → Wartezeit wird verlängert.
+          default: 60
+          selector:
+            number:
+              min: 30
+              max: 90
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+
+        humidity_target:
+          name: Ziel-Feuchte „ausgelüftet"
+          description: Wird dieser Wert erreicht, kommt die Meldung ohne Verlängerung.
+          default: 50
+          selector:
+            number:
+              min: 25
+              max: 80
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+
+        ventilation_bonus:
+          name: Zusätzliche Lüftungszeit
+          description: Wird auf die Grundzeit addiert, solange Lüften nötig und sinnvoll ist.
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 180
+              step: 5
+              unit_of_measurement: min
+              mode: box
+
+        use_absolute_humidity:
+          name: Absolute Feuchte innen/aussen vergleichen
+          description: >
+            Benötigt Aussen-Temperatur und Aussen-Feuchte. Ist die absolute Feuchte
+            draussen nicht niedriger als drinnen, bringt Lüften nichts – es gibt
+            dann keine Verlängerung.
+          default: true
+          selector:
+            boolean:
+
+        ah_margin:
+          name: Mindest-Vorteil beim Lüften
+          description: Um so viel muss die absolute Feuchte aussen niedriger sein.
+          default: 0.5
+          selector:
+            number:
+              min: 0
+              max: 5
+              step: 0.1
+              unit_of_measurement: "g/m³"
+              mode: box
+
+    sec_kalt:
+      name: 5 · Auskühlschutz
+      icon: mdi:snowflake-alert
+      input:
+        min_temperature:
+          name: Minimale Raumtemperatur
+          description: Wird sie unterschritten, kommt die Meldung sofort.
+          default: 17
+          selector:
+            number:
+              min: 5
+              max: 25
+              step: 0.5
+              unit_of_measurement: "°C"
+              mode: box
+
+        max_temp_drop:
+          name: Maximaler Temperaturabfall
+          description: Fällt die Temperatur seit dem Öffnen um so viel, kommt die Meldung sofort.
+          default: 3
+          selector:
+            number:
+              min: 0.5
+              max: 15
+              step: 0.5
+              unit_of_measurement: "K"
+              mode: box
+
+        frost_limit:
+          name: Frostgrenze aussen
+          description: "Aussentemperatur darunter → sofortige Meldung. -50 = Prüfung aus."
+          default: 0
+          selector:
+            number:
+              min: -50
+              max: 15
+              step: 0.5
+              unit_of_measurement: "°C"
+              mode: box
+
+    sec_extra:
+      name: 6 · Zusätzliche Auslöser & Pause
+      icon: mdi:tune
+      input:
+        presence_entities:
+          name: Personen (optional)
+          description: Für „sofort melden, wenn niemand mehr zu Hause ist".
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: person
+              multiple: true
+
+        absence_immediate:
+          name: Sofort melden bei Abwesenheit aller
+          default: true
+          selector:
+            boolean:
+
+        rain_immediate:
+          name: Sofort melden bei Regen/Schnee
+          description: Benötigt eine Wetter-Entität (Abschnitt 2).
+          default: true
+          selector:
+            boolean:
+
+        pause_entity:
+          name: Pausen-Schalter (optional)
+          description: Ist dieser Helfer EIN, wird nicht gewarnt (z. B. „Putztag", „Sommerlüftung").
+          default: []
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+              multiple: true
+
+        check_interval:
+          name: Prüf-Intervall
+          description: Wie oft die Bedingungen während der Wartezeit geprüft werden.
+          default: 60
+          selector:
+            number:
+              min: 15
+              max: 300
+              step: 15
+              unit_of_measurement: s
+              mode: box
+
+mode: restart
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input window_open
+    to: "on"
+    id: auf
+  - trigger: state
+    entity_id: !input window_tilt
+    to: "on"
+    id: gekippt
+  - trigger: homeassistant
+    event: start
+    id: neustart
+
+variables:
+  win_open: !input window_open
+  win_tilt: !input window_tilt
+  temp_ent: !input temperature_sensor
+  hum_ent: !input humidity_sensor
+  out_temp_l: !input outdoor_temperature_sensor
+  out_hum_l: !input outdoor_humidity_sensor
+  weather_l: !input weather_entity
+  presence_l: !input presence_entities
+  pause_l: !input pause_entity
+  room: !input room_name
+
+  targets_raw: !input notify_targets
+  targets: >
+    {% set ns = namespace(l=[]) %}
+    {% for t in targets_raw %}
+      {% set s = t | trim %}
+      {% if s %}{% set ns.l = ns.l + [ s if '.' in s else 'notify.' ~ s ] %}{% endif %}
+    {% endfor %}
+    {{ ns.l }}
+
+  delay_open: !input delay_open
+  delay_tilt: !input delay_tilt
+  repeat_min: !input repeat_interval
+  snooze_min: !input snooze_minutes
+  critical_after: !input critical_after
+  max_rounds: !input max_rounds
+  notify_url: !input notify_url
+  close_confirm: !input close_confirmation
+
+  hum_limit: !input humidity_limit
+  hum_target: !input humidity_target
+  vent_bonus: !input ventilation_bonus
+  use_ah: !input use_absolute_humidity
+  ah_margin: !input ah_margin
+
+  temp_min: !input min_temperature
+  drop_max: !input max_temp_drop
+  frost_limit: !input frost_limit
+
+  absence_immediate: !input absence_immediate
+  rain_immediate: !input rain_immediate
+  check_sec: !input check_interval
+
+  slug: "{{ this.entity_id | replace('automation.', '') }}"
+  alert_tag: "fenster_{{ slug }}"
+  ack_action: "FENSTER_OK_{{ slug | upper }}"
+  snooze_action: "FENSTER_SNOOZE_{{ slug | upper }}"
+
+conditions:
+  # Fenster muss (noch) offen oder gekippt sein – fängt auch den HA-Neustart ab.
+  - condition: template
+    value_template: >
+      {{ is_state(win_open, 'on')
+         or (win_tilt | count > 0
+             and expand(win_tilt) | selectattr('state', 'eq', 'on') | list | count > 0) }}
+  # Pausen-Schalter
+  - condition: template
+    value_template: >
+      {{ pause_l | count == 0
+         or expand(pause_l) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+  - condition: template
+    value_template: "{{ targets | count > 0 }}"
+
+actions:
+  # ---------------------------------------------------------------- Startwerte
+  - variables:
+      opened_at: "{{ now().timestamp() | int }}"
+      temp_start: "{{ states(temp_ent) | float(-999) }}"
+      lueftung_start: >
+        {% set hi = states(hum_ent) | float(-1) %}
+        {{ hi >= 0 and hi >= hum_limit }}
+
+  # ------------------------------------------- Phase 1: Warte-/Lüftungsfenster
+  - repeat:
+      sequence:
+        - delay:
+            seconds: "{{ check_sec }}"
+      until:
+        - condition: template
+          value_template: >
+            {% set tilt_on = win_tilt | count > 0
+                 and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+            {% set offen = is_state(win_open, 'on') or tilt_on %}
+            {% set gekippt = tilt_on and not is_state(win_open, 'on') %}
+
+            {% set ti = states(temp_ent) | float(-999) %}
+            {% set hi = states(hum_ent) | float(-1) %}
+            {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+            {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
+
+            {% set ahi = (216.7 * (hi / 100 * 6.112
+                 * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
+                 if (ti > -900 and hi >= 0) else -1 %}
+            {% set aho = (216.7 * (oh / 100 * 6.112
+                 * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
+                 if (ot > -900 and oh >= 0) else -1 %}
+
+            {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
+            {% set lueften = hi >= 0 and hi >= hum_limit and sinnvoll %}
+            {% set ziel = lueftung_start and hi >= 0 and hi <= hum_target %}
+
+            {% set basis = (delay_tilt if gekippt else delay_open) * 60 %}
+            {% set wartezeit = basis + (vent_bonus * 60 if lueften else 0) %}
+
+            {% set kalt = ti > -900 and ti <= temp_min %}
+            {% set abfall = temp_start > -900 and ti > -900 and (temp_start - ti) >= drop_max %}
+            {% set frost = frost_limit > -50 and ot > -900 and ot <= frost_limit %}
+            {% set weg = absence_immediate and presence_l | count > 0
+                 and expand(presence_l) | selectattr('state','eq','home') | list | count == 0 %}
+            {% set regen = rain_immediate and weather_l | count > 0
+                 and states(weather_l[0]) in
+                 ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
+
+            {% set elapsed = now().timestamp() - opened_at %}
+
+            {{ not offen or kalt or abfall or frost or weg or regen
+               or elapsed >= (basis if ziel else wartezeit) }}
+
+  # Fenster ist inzwischen zu -> fertig, keine Meldung
+  - condition: template
+    value_template: >
+      {{ is_state(win_open, 'on')
+         or (win_tilt | count > 0
+             and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0) }}
+
+  # ----------------------------------------------------------- Grund ermitteln
+  - variables:
+      grund: >
+        {% set ti = states(temp_ent) | float(-999) %}
+        {% set hi = states(hum_ent) | float(-1) %}
+        {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+        {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
+        {% set ahi = (216.7 * (hi / 100 * 6.112
+             * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
+             if (ti > -900 and hi >= 0) else -1 %}
+        {% set aho = (216.7 * (oh / 100 * 6.112
+             * 2.718281828459045 ** (17.62 * ot / (243.12 + ot)) / (273.15 + ot)))
+             if (ot > -900 and oh >= 0) else -1 %}
+        {% set sinnvoll = (not use_ah) or ahi < 0 or aho < 0 or (aho <= ahi - ah_margin) %}
+        {% set kalt = ti > -900 and ti <= temp_min %}
+        {% set abfall = temp_start > -900 and ti > -900 and (temp_start - ti) >= drop_max %}
+        {% set frost = frost_limit > -50 and ot > -900 and ot <= frost_limit %}
+        {% set weg = absence_immediate and presence_l | count > 0
+             and expand(presence_l) | selectattr('state','eq','home') | list | count == 0 %}
+        {% set regen = rain_immediate and weather_l | count > 0
+             and states(weather_l[0]) in
+             ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
+        {% if weg %}Niemand mehr zu Hause – bitte schliessen!
+        {% elif kalt %}Raum kühlt aus ({{ ti | round(1) }} °C) – bitte schliessen!
+        {% elif abfall %}Temperatur um {{ (temp_start - ti) | round(1) }} K gefallen – bitte schliessen!
+        {% elif frost %}Frost draussen ({{ ot | round(1) }} °C) – bitte schliessen!
+        {% elif regen %}Es regnet/schneit – bitte schliessen!
+        {% elif lueftung_start and hi >= 0 and hi <= hum_target %}Ausgelüftet ({{ hi | round(0) | int }} %) – Fenster kann zu.
+        {% elif hi >= hum_limit and not sinnvoll %}Draussen feuchter als drinnen – Lüften bringt nichts.
+        {% elif hi >= hum_limit %}Noch feucht ({{ hi | round(0) | int }} %), aber lange offen.
+        {% else %}Fenster steht schon lange offen.
+        {% endif %}
+
+  # -------------------------------------------------- Phase 2: Dauer-Erinnerung
+  - repeat:
+      sequence:
+        - variables:
+            runde: "{{ repeat.index }}"
+            kritisch: "{{ critical_after > 0 and repeat.index >= critical_after }}"
+            push_data: >
+              {% set acts = [ {'action': ack_action, 'title': 'Erledigt / ignorieren'} ] %}
+              {% if snooze_min > 0 %}
+                {% set acts = acts + [ {'action': snooze_action,
+                     'title': 'Später (' ~ snooze_min ~ ' min)'} ] %}
+              {% endif %}
+              {% set d = {
+                   'tag': alert_tag,
+                   'group': 'fenster',
+                   'apns_headers': {'apns-collapse-id': alert_tag},
+                   'actions': acts,
+                   'push': {
+                     'interruption-level': ('critical' if kritisch else 'time-sensitive'),
+                     'sound': ({'name': 'default', 'critical': 1, 'volume': 1.0}
+                               if kritisch else 'default'),
+                     'thread-id': alert_tag,
+                     'badge': 1
+                   }
+                 } %}
+              {% if notify_url %}{% set d = dict(d, url=notify_url) %}{% endif %}
+              {{ d }}
+
+        - repeat:
+            for_each: "{{ targets }}"
+            sequence:
+              - action: "{{ repeat.item }}"
+                data:
+                  title: >
+                    {% set tilt_on = win_tilt | count > 0
+                         and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+                    {{ '🪟 ' ~ room ~ ': Fenster ' ~ ('gekippt' if tilt_on and not is_state(win_open,'on') else 'offen') }}
+                  message: >
+                    {% set ti = states(temp_ent) | float(-999) %}
+                    {% set hi = states(hum_ent) | float(-1) %}
+                    {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
+                    {% set mins = ((now().timestamp() - opened_at) / 60) | round(0) | int %}
+                    {{ grund | trim }}
+                    Seit {{ mins }} min · 🌡 {{ ti | round(1) }} °C · 💧 {{ hi | round(0) | int }} %
+                    {%- if ot > -900 %} · aussen {{ ot | round(1) }} °C{% endif %}
+                    {%- if runde > 1 %} · ({{ runde }}. Erinnerung){% endif %}
+                  data: "{{ push_data }}"
+
+        - wait_for_trigger:
+            - trigger: state
+              entity_id: !input window_open
+              to: "off"
+            - trigger: state
+              entity_id: !input window_tilt
+              to: "off"
+            - trigger: event
+              event_type: mobile_app_notification_action
+          timeout: "{{ (repeat_min * 60) | int }}"
+          continue_on_timeout: true
+
+        # „Später erinnern" gedrückt -> schlummern und danach erneut melden
+        - if:
+            - condition: template
+              value_template: >
+                {{ snooze_min > 0
+                   and wait.trigger is defined and wait.trigger is not none
+                   and wait.trigger.event is defined
+                   and (wait.trigger.event.data.action | default('')) == snooze_action }}
+          then:
+            - repeat:
+                for_each: "{{ targets }}"
+                sequence:
+                  - action: "{{ repeat.item }}"
+                    data:
+                      message: clear_notification
+                      data:
+                        tag: "{{ alert_tag }}"
+            - delay:
+                minutes: "{{ snooze_min }}"
+      until:
+        - condition: template
+          value_template: >
+            {% set tilt_on = win_tilt | count > 0
+                 and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+            {% set offen = is_state(win_open, 'on') or tilt_on %}
+            {% set act = (wait.trigger.event.data.action | default(''))
+                 if (wait.trigger is defined and wait.trigger is not none
+                     and wait.trigger.event is defined) else '' %}
+            {{ not offen or act == ack_action
+               or (max_rounds > 0 and repeat.index >= max_rounds) }}
+
+  # ------------------------------------------------------------------ Aufräumen
+  - repeat:
+      for_each: "{{ targets }}"
+      sequence:
+        - action: "{{ repeat.item }}"
+          data:
+            message: clear_notification
+            data:
+              tag: "{{ alert_tag }}"
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {% set tilt_on = win_tilt | count > 0
+                   and expand(win_tilt) | selectattr('state','eq','on') | list | count > 0 %}
+              {{ close_confirm and not (is_state(win_open, 'on') or tilt_on) }}
+        sequence:
+          - repeat:
+              for_each: "{{ targets }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: "✅ {{ room }}"
+                    message: >
+                      Fenster geschlossen · 🌡 {{ states(temp_ent) | float(0) | round(1) }} °C
+                      · 💧 {{ states(hum_ent) | float(0) | round(0) | int }} %
+                    data:
+                      tag: "{{ alert_tag }}_ok"
+                      group: fenster
+                      push:
+                        interruption-level: passive
