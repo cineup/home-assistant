@@ -155,7 +155,18 @@ blueprint:
           name: Benachrichtigungsdienste
           description: >
             Ein Eintrag pro iPhone, z. B. `notify.mobile_app_iphone_anna`.
-            Das Präfix `notify.` darf weggelassen werden.
+            Den exakten Namen findest du unter Entwicklerwerkzeuge → Aktionen,
+            Suchfeld `notify.`.
+
+
+            Kurzformen sind erlaubt: `mobile_app_iphone_anna` oder nur
+            `iphone_anna` werden automatisch zu `notify.mobile_app_iphone_anna`
+            ergänzt. Ein Eintrag mit Punkt wird unverändert übernommen, damit
+            auch andere Dienste wie `notify.telegram_familie` möglich sind.
+
+
+            Achtung: das ist der **Dienstname**, nicht der Gerätename aus der
+            Companion-App – er beginnt immer mit `mobile_app_`.
           default: []
           selector:
             text:
@@ -615,8 +626,13 @@ variables:
   targets: >
     {% set ns = namespace(l=[]) %}
     {% for t in targets_raw %}
-      {% set s = t | trim %}
-      {% if s %}{% set ns.l = ns.l + [ s if '.' in s else 'notify.' ~ s ] %}{% endif %}
+      {% set s = t | trim | lower %}
+      {% if s %}
+        {% if '.' in s %}{% set n = s %}
+        {% elif s.startswith('mobile_app_') %}{% set n = 'notify.' ~ s %}
+        {% else %}{% set n = 'notify.mobile_app_' ~ s %}{% endif %}
+        {% set ns.l = ns.l + [ n ] %}
+      {% endif %}
     {% endfor %}
     {{ ns.l }}
 
@@ -698,6 +714,7 @@ actions:
               for_each: "{{ targets }}"
               sequence:
                 - action: "{{ repeat.item }}"
+                  continue_on_error: true
                   data:
                     message: clear_notification
                     data:
@@ -873,6 +890,7 @@ actions:
                     for_each: "{{ targets }}"
                     sequence:
                       - action: "{{ repeat.item }}"
+                        continue_on_error: true
                         data:
                           title: >
                             {% set tilt_on = win_tilt | count > 0
@@ -915,6 +933,7 @@ actions:
                         for_each: "{{ targets }}"
                         sequence:
                           - action: "{{ repeat.item }}"
+                            continue_on_error: true
                             data:
                               message: clear_notification
                               data:
@@ -938,6 +957,7 @@ actions:
               for_each: "{{ targets }}"
               sequence:
                 - action: "{{ repeat.item }}"
+                  continue_on_error: true
                   data:
                     message: clear_notification
                     data:
@@ -955,6 +975,7 @@ actions:
                       for_each: "{{ targets }}"
                       sequence:
                         - action: "{{ repeat.item }}"
+                          continue_on_error: true
                           data:
                             title: "✅ {{ room }}"
                             message: >
@@ -1022,6 +1043,7 @@ actions:
                         for_each: "{{ targets }}"
                         sequence:
                           - action: "{{ repeat.item }}"
+                            continue_on_error: true
                             data:
                               title: >
                                 {{ ('💧 ' ~ room ~ ': bitte lüften')
@@ -1098,6 +1120,7 @@ actions:
               for_each: "{{ targets }}"
               sequence:
                 - action: "{{ repeat.item }}"
+                  continue_on_error: true
                   data:
                     message: clear_notification
                     data:
