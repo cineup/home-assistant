@@ -26,14 +26,16 @@ blueprint:
       feuchte unterschreitet – also lange bevor sichtbares Tauwasser entsteht.
 
 
-    Zusätzlich wird die *absolute* Feuchte innen/aussen verglichen: ist es draussen
-    feuchter, bringt Lüften nichts – dann gibt es keine Verlängerung und keine
-    Lüftungsaufforderung.
+    Vor jeder Lüftungsaufforderung wird außerdem berechnet, auf welche Feuchte
+    ein vollständiger Luftwechsel die Wand bringen würde. Nur wenn das unter der
+    Schimmelgrenze landet, wird gelüftet – sonst lautet der Rat „Raum wärmer
+    halten". Nach einem Lüften bekommt der Raum eine Ruhezeit, bevor erneut
+    erinnert wird.
 
 
     Meldungen wiederholen sich in einstellbarem Takt bis das Fenster zu ist oder
     jemand bestätigt hat. Durch den gleichen `tag` ersetzt sich die Meldung selbst,
-    es entsteht keine Flut. Beim Schliessen wird sie automatisch entfernt.
+    es entsteht keine Flut. Beim Schließen wird sie automatisch entfernt.
 
 
     **Eine Automatisierung pro Fenster/Raum.**
@@ -100,7 +102,7 @@ blueprint:
                 device_class: humidity
 
         outdoor_temperature_sensor:
-          name: Temperatur aussen
+          name: Temperatur außen
           description: >
             Für Frostwarnung, den Vergleich der absoluten Feuchte und die
             Schätzung der Wandtemperatur. Ohne diesen Sensor arbeitet das
@@ -114,8 +116,8 @@ blueprint:
               multiple: true
 
         outdoor_humidity_sensor:
-          name: Luftfeuchte aussen (optional)
-          description: Nur zusammen mit „Temperatur aussen" sinnvoll.
+          name: Luftfeuchte außen (optional)
+          description: Nur zusammen mit „Temperatur außen" sinnvoll.
           default: []
           selector:
             entity:
@@ -127,7 +129,7 @@ blueprint:
         wall_temperature_sensor:
           name: Wandoberflächen-Temperatur (optional)
           description: >
-            Falls vorhanden (z. B. DS18B20 an der kältesten Aussenwandecke).
+            Falls vorhanden (z. B. DS18B20 an der kältesten Außenwandecke).
             Ersetzt die Schätzung über den Temperaturfaktor.
           default: []
           selector:
@@ -267,7 +269,7 @@ blueprint:
           description: >
             **Taupunkt:** rechnet die Feuchte auf die kalte Wandoberfläche um –
             physikalisch korrekt und deutlich früher dran.
-            **Relative Feuchte:** einfacher Schwellwert, falls kein Aussensensor
+            **Relative Feuchte:** einfacher Schwellwert, falls kein Außensensor
             vorhanden ist.
           default: taupunkt
           selector:
@@ -280,7 +282,7 @@ blueprint:
                   value: relativ
 
         wall_factor:
-          name: Temperaturfaktor fRsi der Aussenwand
+          name: Temperaturfaktor fRsi der Außenwand
           description: >
             Nur wenn kein Wandsensor vorhanden. Wie warm bleibt die Wandinnenseite?
             Altbau ungedämmt ≈ 0.5–0.6 · saniert ≈ 0.7 · Neubau/KfW ≈ 0.85.
@@ -342,7 +344,7 @@ blueprint:
 
         ventilation_bonus:
           name: Zusätzliche Lüftungszeit
-          description: Wird auf die Grundzeit addiert, solange Lüften nötig und sinnvoll ist.
+          description: Wird auf die Grundzeit addiert, solange Lüften nötig ist und laut Prognose auch hilft.
           default: 15
           selector:
             number:
@@ -353,17 +355,17 @@ blueprint:
               mode: box
 
         use_absolute_humidity:
-          name: Absolute Feuchte innen/aussen vergleichen
+          name: Absolute Feuchte innen/außen vergleichen
           description: >
-            Benötigt Aussen-Temperatur und Aussen-Feuchte. Ist die absolute Feuchte
-            draussen nicht niedriger als drinnen, bringt Lüften nichts.
+            Benötigt Außen-Temperatur und Außen-Feuchte. Ist die absolute Feuchte
+            draußen nicht niedriger als drinnen, bringt Lüften nichts.
           default: true
           selector:
             boolean:
 
         ah_margin:
           name: Mindest-Vorteil beim Lüften
-          description: Um so viel muss die absolute Feuchte aussen niedriger sein.
+          description: Um so viel muss die absolute Feuchte außen niedriger sein.
           default: 0.5
           selector:
             number:
@@ -402,8 +404,8 @@ blueprint:
               mode: box
 
         frost_limit:
-          name: Frostgrenze aussen
-          description: "Aussentemperatur darunter → sofortige Meldung. -50 = Prüfung aus."
+          name: Frostgrenze außen
+          description: "Außentemperatur darunter → sofortige Meldung. -50 = Prüfung aus."
           default: 0
           selector:
             number:
@@ -461,19 +463,37 @@ blueprint:
 
         vent_repeat:
           name: Wiederholung der Lüftungs-Erinnerung
-          description: 0 = nur einmal melden.
-          default: 30
+          description: >
+            Schimmel entsteht über Tage, nicht über Minuten – ein ruhiger Takt
+            reicht. 0 = nur einmal melden.
+          default: 120
           selector:
             number:
               min: 0
-              max: 240
-              step: 5
+              max: 720
+              step: 15
               unit_of_measurement: min
+              mode: box
+
+        vent_cooldown:
+          name: Ruhezeit nach dem Lüften
+          description: >
+            Wurde das Fenster vor Kurzem geöffnet, bekommt das Lüften so lange
+            Zeit zu wirken. Ist es danach immer noch kritisch, kommt der Hinweis
+            „wieder feucht" – dann steckt eine Feuchtequelle im Raum.
+            Gilt nicht für den schnellen Feuchteanstieg (Duschen). 0 = aus.
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 12
+              step: 0.5
+              unit_of_measurement: h
               mode: box
 
         vent_time_start:
           name: Frühestens ab
-          description: Ausserhalb dieses Fensters wird nicht zum Lüften aufgefordert.
+          description: Außerhalb dieses Fensters wird nicht zum Lüften aufgefordert.
           default: "07:00:00"
           selector:
             time:
@@ -485,10 +505,13 @@ blueprint:
             time:
 
         vent_only_if_useful:
-          name: Nur erinnern, wenn Lüften auch etwas bringt
+          name: Nur erinnern, wenn Lüften das Problem löst
           description: >
-            EIN = bei feuchter Aussenluft schweigen. AUS = stattdessen den Hinweis
-            senden, dass geheizt statt gelüftet werden sollte.
+            Vor jeder Erinnerung wird berechnet, auf welche Feuchte das Lüften die
+            Wand (bzw. den Raum) bringt. EIN = nur melden, wenn sie danach unter
+            der Grenze liegt. AUS = sonst den Hinweis „Raum wärmer halten" senden.
+            Ohne Außenfeuchte-Sensor rechnet die Prognose mit 100 % Außenfeuchte,
+            dem ungünstigsten Fall.
           default: true
           selector:
             boolean:
@@ -660,6 +683,7 @@ variables:
   frost_limit: !input frost_limit
 
   vent_repeat: !input vent_repeat
+  vent_cooldown: !input vent_cooldown
   vent_start: !input vent_time_start
   vent_end: !input vent_time_end
   vent_useful_only: !input vent_only_if_useful
@@ -757,7 +781,7 @@ actions:
                     {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
                     {% set oh = states(out_hum_l[0]) | float(-1) if out_hum_l | count > 0 else -1 %}
 
-                    {# absolute Feuchte innen/aussen (Magnus) #}
+                    {# absolute Feuchte innen/außen (Magnus) #}
                     {% set ahi = (216.7 * (hi / 100 * 6.112
                          * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)) / (273.15 + ti)))
                          if (ti > -900 and hi >= 0) else -1 %}
@@ -773,6 +797,21 @@ actions:
                     {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
                     {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
                          else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+                    {# Prognose: Feuchte nach vollstaendigem Luftwechsel. Beim Erwaermen der
+                       Außenluft bleibt ihr Dampfdruck gleich, nur die Saettigung steigt. #}
+                    {% set bez = 'Wandfeuchte' if mold_mode == 'taupunkt' else 'Raumfeuchte' %}
+                    {% set grenze = mold_rh if mold_mode == 'taupunkt' else hum_limit %}
+                    {% set ei = (hi / 100 * 6.112 * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)))
+                         if (ti > -900 and hi >= 0) else -1 %}
+                    {% set eo = (((oh / 100) if oh >= 0 else 1.0) * 6.112
+                         * 2.718281828459045 ** (17.62 * ot / (243.12 + ot))) if ot > -900 else -1 %}
+                    {% set tref = tw if mold_mode == 'taupunkt' else ti %}
+                    {% set es = (6.112 * 2.718281828459045 ** (17.62 * tref / (243.12 + tref)))
+                         if tref > -900 else -1 %}
+                    {% set rf_jetzt = ((100 * ei / es) if (ei >= 0 and es > 0) else -1)
+                         if mold_mode == 'taupunkt' else hi %}
+                    {% set rf_nach = (100 * eo / es) if (eo >= 0 and es > 0) else -1 %}
+                    {% set wirksam = sinnvoll and (rf_nach < 0 or rf_nach < grenze) %}
 
                     {% if mold_mode == 'taupunkt' %}
                       {% set gefahr = tw > -900 and td80 > -900 and tw <= td80 %}
@@ -782,7 +821,7 @@ actions:
                       {% set gefahr = hi >= 0 and hi >= hum_limit %}
                       {% set ziel = lueftung_start and hi >= 0 and hi <= hum_target %}
                     {% endif %}
-                    {% set lueften = gefahr and sinnvoll %}
+                    {% set lueften = gefahr and wirksam %}
 
                     {% set basis = (delay_tilt if gekippt else delay_open) * 60 %}
                     {% set wartezeit = basis + (vent_bonus * 60 if lueften else 0) %}
@@ -828,6 +867,21 @@ actions:
                 {% set td80 = (243.12 * a80 / (17.62 - a80)) if a80 is not none else -999 %}
                 {% set tw = states(wall_l[0]) | float(-999) if wall_l | count > 0
                      else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
+                {# Prognose: Feuchte nach vollstaendigem Luftwechsel. Beim Erwaermen der
+                   Außenluft bleibt ihr Dampfdruck gleich, nur die Saettigung steigt. #}
+                {% set bez = 'Wandfeuchte' if mold_mode == 'taupunkt' else 'Raumfeuchte' %}
+                {% set grenze = mold_rh if mold_mode == 'taupunkt' else hum_limit %}
+                {% set ei = (hi / 100 * 6.112 * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)))
+                     if (ti > -900 and hi >= 0) else -1 %}
+                {% set eo = (((oh / 100) if oh >= 0 else 1.0) * 6.112
+                     * 2.718281828459045 ** (17.62 * ot / (243.12 + ot))) if ot > -900 else -1 %}
+                {% set tref = tw if mold_mode == 'taupunkt' else ti %}
+                {% set es = (6.112 * 2.718281828459045 ** (17.62 * tref / (243.12 + tref)))
+                     if tref > -900 else -1 %}
+                {% set rf_jetzt = ((100 * ei / es) if (ei >= 0 and es > 0) else -1)
+                     if mold_mode == 'taupunkt' else hi %}
+                {% set rf_nach = (100 * eo / es) if (eo >= 0 and es > 0) else -1 %}
+                {% set wirksam = sinnvoll and (rf_nach < 0 or rf_nach < grenze) %}
                 {% if mold_mode == 'taupunkt' %}
                   {% set gefahr = tw > -900 and td80 > -900 and tw <= td80 %}
                   {% set ziel = lueftung_start and tw > -900 and td80 > -900
@@ -844,17 +898,15 @@ actions:
                 {% set regen = rain_immediate and weather_l | count > 0
                      and states(weather_l[0]) in
                      ['rainy','pouring','hail','snowy','snowy-rainy','lightning-rainy','lightning'] %}
-                {% if weg %}Niemand mehr zu Hause – bitte schliessen!
-                {% elif kalt %}Raum kühlt aus ({{ ti | round(1) }} °C) – bitte schliessen!
-                {% elif abfall %}Temperatur um {{ (temp_start - ti) | round(1) }} K gefallen – bitte schliessen!
-                {% elif frost %}Frost draussen ({{ ot | round(1) }} °C) – bitte schliessen!
-                {% elif regen %}Es regnet/schneit – bitte schliessen!
-                {% elif ziel %}Ausgelüftet – Wand {{ tw | round(1) }} °C liegt wieder über dem
-                  kritischen Taupunkt {{ td80 | round(1) }} °C. Fenster kann zu.
-                {% elif gefahr and not sinnvoll %}Draussen feuchter als drinnen – Lüften bringt nichts.
-                {% elif gefahr and mold_mode == 'taupunkt' %}Wand {{ tw | round(1) }} °C, kritischer
-                  Taupunkt {{ td80 | round(1) }} °C – noch nicht ausgelüftet, aber lange offen.
-                {% elif gefahr %}Noch feucht ({{ hi | round(0) | int }} %), aber lange offen.
+                {% if weg %}Niemand mehr zu Hause – bitte schließen!
+                {% elif kalt %}Raum kühlt aus ({{ ti | round(1) }} °C) – bitte schließen!
+                {% elif abfall %}Temperatur um {{ (temp_start - ti) | round(1) }} K gefallen – bitte schließen!
+                {% elif frost %}Frost draußen ({{ ot | round(1) }} °C) – bitte schließen!
+                {% elif regen %}Es regnet/schneit – bitte schließen!
+                {% elif ziel %}Ausgelüftet – {{ bez }} {{ rf_jetzt | round(0) | int }} %. Fenster kann zu.
+                {% elif gefahr and not sinnvoll %}Draußen ist die Luft feuchter – Lüften bringt nichts.
+                {% elif gefahr and not wirksam %}Lüften allein reicht hier nicht ({{ bez }} bliebe bei {{ rf_nach | round(0) | int }} %) – Fenster kann zu.
+                {% elif gefahr %}{{ bez }} noch {{ rf_jetzt | round(0) | int }} %, aber schon lange offen.
                 {% else %}Fenster steht schon lange offen.
                 {% endif %}
 
@@ -902,10 +954,10 @@ actions:
                             {% set hi = states(hum_ent) | float(-1) %}
                             {% set ot = states(out_temp_l[0]) | float(-999) if out_temp_l | count > 0 else -999 %}
                             {% set mins = ((now().timestamp() - opened_at) / 60) | round(0) | int %}
-                            {{ grund | trim }}
-                            Seit {{ mins }} min · 🌡 {{ ti | round(1) }} °C · 💧 {{ hi | round(0) | int }} %
-                            {%- if ot > -900 %} · aussen {{ ot | round(1) }} °C{% endif %}
-                            {%- if runde > 1 %} · ({{ runde }}. Erinnerung){% endif %}
+                            {{ grund.split() | join(' ') ~ '\n' ~ 'Seit ' ~ mins ~ ' min · 🌡 '
+                               ~ (ti | round(1)) ~ ' °C · 💧 ' ~ (hi | round(0) | int) ~ ' %'
+                               ~ ((' · außen ' ~ (ot | round(1)) ~ ' °C') if ot > -900 else '')
+                               ~ ((' · ' ~ runde ~ '. Erinnerung') if runde > 1 else '') }}
                           data: "{{ push_data }}"
 
                 - wait_for_trigger:
@@ -997,6 +1049,28 @@ actions:
               {{ ((trigger.id | default('')) if trigger is defined else '')
                  in ['kondensat', 'anstieg'] }}
         sequence:
+          # Kuerzlich gelueftet? Dann bekommt das Lueften erst Zeit zu wirken.
+          # Gilt nicht fuer den schnellen Feuchteanstieg - frisch geduscht ist
+          # ein neues Ereignis.
+          - variables:
+              zu_seit: >
+                {% set lc = expand([win_open] + win_tilt)
+                     | map(attribute='last_changed') | max %}
+                {{ (now() - lc).total_seconds() | int }}
+              gelueftet_um: >
+                {% set lc = expand([win_open] + win_tilt)
+                     | map(attribute='last_changed') | max %}
+                {{ as_local(lc).strftime('%H:%M') }}
+              trotz_lueften: >
+                {{ ((trigger.id | default('')) if trigger is defined else '') == 'kondensat'
+                   and vent_cooldown > 0 and zu_seit < vent_cooldown * 3600 }}
+          - if:
+              - condition: template
+                value_template: "{{ trotz_lueften }}"
+            then:
+              - delay:
+                  seconds: "{{ (vent_cooldown * 3600 - zu_seit) | int }}"
+
           - repeat:
               sequence:
                 - variables:
@@ -1021,13 +1095,30 @@ actions:
                            else ((ot + wall_factor * (ti - ot)) if (ti > -900 and ot > -900) else -999) %}
                       {% set gefahr = (tw > -900 and td80 > -900 and tw <= td80)
                            if mold_mode == 'taupunkt' else (hi >= 0 and hi >= hum_limit) %}
+                      {# Prognose: Feuchte nach vollstaendigem Luftwechsel. Beim Erwaermen der
+                         Außenluft bleibt ihr Dampfdruck gleich, nur die Saettigung steigt. #}
+                      {% set bez = 'Wandfeuchte' if mold_mode == 'taupunkt' else 'Raumfeuchte' %}
+                      {% set grenze = mold_rh if mold_mode == 'taupunkt' else hum_limit %}
+                      {% set ei = (hi / 100 * 6.112 * 2.718281828459045 ** (17.62 * ti / (243.12 + ti)))
+                           if (ti > -900 and hi >= 0) else -1 %}
+                      {% set eo = (((oh / 100) if oh >= 0 else 1.0) * 6.112
+                           * 2.718281828459045 ** (17.62 * ot / (243.12 + ot))) if ot > -900 else -1 %}
+                      {% set tref = tw if mold_mode == 'taupunkt' else ti %}
+                      {% set es = (6.112 * 2.718281828459045 ** (17.62 * tref / (243.12 + tref)))
+                           if tref > -900 else -1 %}
+                      {% set rf_jetzt = ((100 * ei / es) if (ei >= 0 and es > 0) else -1)
+                           if mold_mode == 'taupunkt' else hi %}
+                      {% set rf_nach = (100 * eo / es) if (eo >= 0 and es > 0) else -1 %}
+                      {% set wirksam = sinnvoll and (rf_nach < 0 or rf_nach < grenze) %}
                       {% set rate = states(rate_l[0]) | float(0) if rate_l | count > 0 else 0 %}
                       {% set anstieg = rate_l | count > 0 and rate >= rate_limit %}
-                      {{ {'ti': ti, 'hi': hi, 'ot': ot, 'tw': tw, 'td80': td80, 'ahi': ahi,
-                          'aho': aho, 'rate': rate, 'gefahr': gefahr, 'anstieg': anstieg,
-                          'sinnvoll': sinnvoll} }}
+                      {{ {'ti': ti, 'hi': hi, 'ot': ot, 'rate': rate,
+                          'rf_jetzt': rf_jetzt, 'rf_nach': rf_nach, 'grenze': grenze,
+                          'oh_bekannt': oh >= 0, 'gefahr': gefahr, 'anstieg': anstieg,
+                          'sinnvoll': sinnvoll, 'wirksam': wirksam} }}
 
-                # Nur innerhalb des Zeitfensters und nur wenn die Lage noch besteht
+                # Nur im Zeitfenster, nur solange die Lage besteht, und - je nach
+                # Einstellung - nur wenn Lueften das Problem laut Prognose auch loest
                 - if:
                     - condition: template
                       value_template: >
@@ -1036,36 +1127,54 @@ actions:
                              if vent_start <= vent_end
                              else (jetzt >= vent_start or jetzt <= vent_end) %}
                         {{ imfenster and (lage.gefahr or lage.anstieg)
-                           and (lage.sinnvoll or not vent_useful_only)
+                           and (lage.wirksam or not vent_useful_only)
                            and (vent_repeat > 0 or vrunde == 1) }}
                   then:
+                    - variables:
+                        v_titel: >
+                          {% if not lage.sinnvoll %}🔥 {{ room }}: heizen statt lüften
+                          {%- elif not lage.wirksam %}🔥 {{ room }}: Lüften reicht nicht
+                          {%- elif trotz_lueften %}💧 {{ room }}: wieder feucht
+                          {%- elif lage.anstieg and not lage.gefahr %}💧 {{ room }}: jetzt lüften
+                          {%- else %}💧 {{ room }}: bitte lüften{% endif %}
+                        v_text: >
+                          {%- set bez = 'Wandfeuchte' if mold_mode == 'taupunkt' else 'Raumfeuchte' -%}
+                          {%- set ab = 'Schimmel ab' if mold_mode == 'taupunkt' else 'Grenze' -%}
+                          {%- set jetzt = bez ~ ' ' ~ (lage.rf_jetzt | round(0) | int) ~ ' % ('
+                               ~ ab ~ ' ' ~ (lage.grenze | int) ~ ' %)' -%}
+                          {%- set nach = lage.rf_nach | round(0) | int -%}
+                          {%- if not lage.sinnvoll -%}
+                            {%- set z1 = 'Draußen ist die Luft feuchter – Lüften bringt nichts. '
+                                 ~ jetzt ~ ', Raum lieber wärmer halten.' -%}
+                          {%- elif not lage.wirksam -%}
+                            {%- set z1 = jetzt ~ '. Lüften senkt sie '
+                                 ~ ('nur auf ≈ ' if lage.oh_bekannt else 'bei feuchter Außenluft nur auf ')
+                                 ~ nach ~ ' % – Raum wärmer halten hilft mehr.' -%}
+                          {%- elif trotz_lueften -%}
+                            {%- set z1 = 'Seit dem Lüften um ' ~ gelueftet_um ~ ' wieder ' ~ jetzt
+                                 ~ '. Feuchtequelle im Raum (nasse Handtücher, Wäsche)?' -%}
+                          {%- elif lage.anstieg and not lage.gefahr -%}
+                            {%- set z1 = 'Feuchte steigt schnell (' ~ (lage.rate | round(1))
+                                 ~ ' %/h) – jetzt kurz stoßlüften, bevor es kritisch wird.' -%}
+                          {%- elif lage.rf_nach < 0 -%}
+                            {%- set z1 = jetzt ~ '. Bitte lüften.' -%}
+                          {%- else -%}
+                            {%- set z1 = jetzt ~ '. Lüften senkt sie auf '
+                                 ~ ('≈ ' if lage.oh_bekannt else 'höchstens ') ~ nach ~ ' %.' -%}
+                          {%- endif -%}
+                          {%- set z2 = '🌡 ' ~ (lage.ti | round(1)) ~ ' °C · 💧 '
+                               ~ (lage.hi | round(0) | int) ~ ' %'
+                               ~ ((' · außen ' ~ (lage.ot | round(1)) ~ ' °C') if lage.ot > -900 else '')
+                               ~ ((' · ' ~ vrunde ~ '. Erinnerung') if vrunde > 1 else '') -%}
+                          {{ z1 ~ '\n' ~ z2 }}
                     - repeat:
                         for_each: "{{ targets }}"
                         sequence:
                           - action: "{{ repeat.item }}"
                             continue_on_error: true
                             data:
-                              title: >
-                                {{ ('💧 ' ~ room ~ ': bitte lüften')
-                                   if lage.sinnvoll
-                                   else ('🔥 ' ~ room ~ ': heizen statt lüften') }}
-                              message: >
-                                {% if not lage.sinnvoll %}
-                                  Schimmelgefahr, aber draussen ist es feuchter
-                                  ({{ lage.aho | round(1) }} statt {{ lage.ahi | round(1) }} g/m³) –
-                                  Lüften bringt jetzt nichts, Raum lieber wärmer halten.
-                                {% elif lage.anstieg and not lage.gefahr %}
-                                  Feuchte steigt schnell ({{ lage.rate | round(1) }} %/h) –
-                                  jetzt kurz stosslüften, bevor es kritisch wird.
-                                {% elif mold_mode == 'taupunkt' %}
-                                  Wandoberfläche {{ lage.tw | round(1) }} °C liegt unter dem
-                                  kritischen Taupunkt {{ lage.td80 | round(1) }} °C – Schimmelgefahr.
-                                {% else %}
-                                  Raumfeuchte {{ lage.hi | round(0) | int }} % über dem Grenzwert.
-                                {% endif %}
-                                🌡 {{ lage.ti | round(1) }} °C · 💧 {{ lage.hi | round(0) | int }} %
-                                {%- if lage.ot > -900 %} · aussen {{ lage.ot | round(1) }} °C{% endif %}
-                                {%- if vrunde > 1 %} · ({{ vrunde }}. Erinnerung){% endif %}
+                              title: "{{ v_titel }}"
+                              message: "{{ v_text }}"
                               data: >
                                 {% set d = {
                                      'tag': vent_tag,
@@ -1073,7 +1182,7 @@ actions:
                                      'apns_headers': {'apns-collapse-id': vent_tag},
                                      'actions': [ {'action': vent_ack_action, 'title': 'Erledigt'} ],
                                      'push': {
-                                       'interruption-level': 'time-sensitive',
+                                       'interruption-level': 'active',
                                        'sound': 'default',
                                        'thread-id': vent_tag
                                      }
